@@ -5,6 +5,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - CLI uses argparse with subparsers for subcommands (scrape, analyze, rankings, status)
 - Each command has a cmd_<name> function handler in main.py that imports and calls module functions
 - Module functions are imported lazily inside command handlers to avoid import errors when modules are incomplete
+- Database: Use `from db import get_connection` to get SQLite connections, DB file is `mr_books.db`
+- All database tables use CREATE TABLE IF NOT EXISTS for idempotent initialization
 ---
 
 ## 2026-01-19 - US-001
@@ -20,4 +22,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - The CLI uses lazy imports in command handlers to avoid import errors from incomplete modules
   - `python main.py --help` runs successfully, confirming the basic structure works
   - Each subcommand has its own set_defaults(func=cmd_X) for routing
+---
+
+## 2026-01-19 - US-002
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented SQLite database schema in db.py
+- Files modified:
+  - db.py: Added init_db() function with all required tables
+- Tables created:
+  - posts: id, url (unique), title, date_published, content_html, content_text, scraped_at
+  - books: id, title, author, sentiment_score, genre, created_at
+  - book_mentions: id, book_id, post_id, context_text, sentiment_score, UNIQUE(book_id, post_id)
+  - scrape_progress: id, page_number, completed_at
+- **Learnings for future iterations:**
+  - DB_PATH is set to be in the same directory as db.py using os.path.dirname(os.path.abspath(__file__))
+  - get_connection() helper function available for getting database connections
+  - All tables use CREATE TABLE IF NOT EXISTS for idempotent initialization
+  - book_mentions table has foreign keys to books and posts tables
 ---
