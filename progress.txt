@@ -25,6 +25,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Caching: posts.books_extracted_at tracks extraction completion; use get_posts_for_extraction() for incremental processing
 - Fail-fast: Use check_ollama_available() at start when --use-ollama to avoid wasting time if Ollama unavailable
 - Schema Migration: Use PRAGMA table_info() + ALTER TABLE ADD COLUMN for backwards-compatible migrations
+- Full-context LLM: Use analyze_post_with_llm() with --full-context flag for single LLM call per post extracting books + sentiment
+- Full-context LLM: Returns JSON array; use regex to extract [...] pattern when LLM adds extra text
+- Full-context LLM: Use insert_book_mention_with_sentiment() to store sentiment directly with mention
 ---
 
 ## 2026-01-19 - US-001
@@ -298,4 +301,32 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Ollama /api/tags endpoint lists available models; check before attempting generation
   - When caching, provide both "skip if cached" and "force refresh" options (--reextract)
   - Even when skipping extraction, continue to sentiment analysis/categorization phases
+---
+
+## 2026-01-19 - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented full-context LLM analysis for book extraction and sentiment
+- Files modified:
+  - analyzer.py: Added analyze_post_with_llm(), analyze_posts_full_context() functions
+  - db.py: Added insert_book_mention_with_sentiment() function
+  - main.py: Added --full-context flag to analyze command
+- Features:
+  - analyze_post_with_llm(): Single LLM call per post that returns JSON array of books with sentiment
+  - Takes full post content (up to 8000 chars) instead of 300-char snippets
+  - Prompt instructs LLM to find ALL books and rate Tyler's sentiment 1-10
+  - Different prompts for regular posts vs interview/transcript posts
+  - For interviews, only extracts Tyler's opinions, not guests'
+  - Returns normalized sentiment score (-1 to 1) matching existing scale
+  - JSON parsing handles LLM adding extra text around the JSON array
+  - Graceful error handling: logs warning and skips post on JSON parse failures
+  - Uses find_or_create_book() for deduplication across posts
+  - Stores LLM reasoning as context_text for reference
+  - --full-context flag enables this mode (keeps old approach as fallback)
+- **Learnings for future iterations:**
+  - LLMs often add extra text around JSON output; use regex to extract [...] pattern
+  - Truncate long posts (>8000 chars) to avoid token limits
+  - Different prompts for interview vs regular posts improves accuracy
+  - Score normalization: (score - 5.5) / 4.5 converts 1-10 to -1 to 1
+  - When inserting mentions with sentiment, use insert_book_mention_with_sentiment() to set score directly
+  - Full-context mode skips separate sentiment analysis phase since LLM already scored books
 ---
