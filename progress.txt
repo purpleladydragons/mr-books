@@ -32,6 +32,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Bradley-Terry: comparisons table stores pairwise results; bt_score columns on book_mentions and books
 - Bradley-Terry: Use sample_pairs() for random sampling; compare_pairs_parallel() for parallel LLM calls
 - Bradley-Terry: rankings command auto-detects and uses bt_score when available via has_bt_scores()
+- Bradley-Terry (Adaptive): Use --adaptive flag for uncertainty-based sampling; refits model every 1000 comparisons
+- Bradley-Terry (Adaptive): sample_pairs_adaptive() uses three-tier strategy: coverage → uncertainty → random
 ---
 
 ## 2026-01-19 - US-001
@@ -360,4 +362,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Rate limiting across workers: RateLimiter with lock ensures thread-safe timing
   - Batch db operations (insert_comparisons_batch, update_mention_bt_scores_batch) for efficiency
   - LLM comparison prompt should be explicit about what to compare (review positivity, not book quality)
+---
+
+## 2026-01-20 - US-017
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented adaptive/uncertainty sampling for Bradley-Terry comparisons
+- Files modified:
+  - analyzer.py: Added sample_pairs_adaptive(), _sample_uncertain_pair(), compute_uncertainty_metric(), _run_adaptive_ranking()
+  - db.py: Added get_mention_comparison_counts(), get_mentions_with_bt_scores()
+  - main.py: Added --adaptive flag to rank command
+- Features:
+  - sample_pairs_adaptive(): Three-tier sampling strategy: coverage (60%), uncertainty (32%), random fallback (8%)
+  - Coverage-focused: Prioritizes items with < 5 comparisons to ensure minimum coverage
+  - Uncertainty-focused: Uses exponential weighting e^(-5*diff) to favor pairs with similar BT scores
+  - _sample_uncertain_pair(): Samples 50 candidates and uses weighted random selection
+  - compute_uncertainty_metric(): Tracks total uncertainty, avg gap between ranks, coverage percentage
+  - _run_adaptive_ranking(): Refits BT model every 1000 comparisons, updates uncertainty estimates
+  - Logs uncertainty reduction per batch and overall efficiency metrics
+  - Falls back to random sampling for new items or when uncertainty sampling fails
+- **Learnings for future iterations:**
+  - Exponential weighting e^(-5*diff) works well for uncertainty sampling - high sensitivity to small differences
+  - Three-tier strategy balances coverage vs uncertainty: prioritize coverage early, then focus on close calls
+  - Sampling 50 candidates for uncertainty pairs is a good balance between quality and speed
+  - Periodic refitting (every 1000 comparisons) keeps uncertainty estimates fresh without too much overhead
+  - Tracking uncertainty reduction per 1000 comparisons gives good efficiency metrics
 ---
