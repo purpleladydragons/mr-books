@@ -237,8 +237,99 @@ def get_scrape_status():
 
 
 def get_ranked_books(top=None, genre=None):
-    """Get books ranked by sentiment score."""
-    pass
+    """Get books ranked by sentiment score and print formatted results.
+
+    Args:
+        top: Limit results to top N books (default: all books)
+        genre: Filter by genre (for US-010, not yet implemented)
+
+    Returns:
+        List of dicts with book info and post URLs
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Build query with optional genre filter
+    query = '''
+        SELECT b.id, b.title, b.author, b.sentiment_score, b.genre
+        FROM books b
+        WHERE b.sentiment_score IS NOT NULL
+    '''
+    params = []
+
+    if genre:
+        query += ' AND b.genre = ?'
+        params.append(genre)
+
+    query += ' ORDER BY b.sentiment_score DESC'
+
+    if top:
+        query += ' LIMIT ?'
+        params.append(top)
+
+    cursor.execute(query, params)
+    books = cursor.fetchall()
+
+    if not books:
+        print("No books with sentiment scores found.")
+        print("Run 'python main.py analyze' first to extract and analyze books.")
+        conn.close()
+        return []
+
+    # Get post URLs for each book
+    results = []
+    for book_id, title, author, sentiment_score, book_genre in books:
+        cursor.execute('''
+            SELECT DISTINCT p.url
+            FROM book_mentions bm
+            JOIN posts p ON bm.post_id = p.id
+            WHERE bm.book_id = ?
+            ORDER BY p.date_published DESC
+        ''', (book_id,))
+        post_urls = [row[0] for row in cursor.fetchall()]
+
+        results.append({
+            'id': book_id,
+            'title': title,
+            'author': author,
+            'sentiment_score': sentiment_score,
+            'genre': book_genre,
+            'post_urls': post_urls
+        })
+
+    conn.close()
+
+    # Print formatted output
+    print("=" * 80)
+    print("Marginal Revolution Book Rankings (by Sentiment Score)")
+    print("=" * 80)
+    print()
+
+    for rank, book in enumerate(results, 1):
+        score = book['sentiment_score']
+        score_str = f"{score:+.3f}" if score is not None else "N/A"
+
+        # Print rank, title, and score
+        print(f"{rank:3}. {book['title']}")
+        print(f"     Score: {score_str}")
+
+        # Print post URLs (limit to 3 to keep output readable)
+        urls = book['post_urls']
+        if urls:
+            print(f"     Mentioned in {len(urls)} post(s):")
+            for url in urls[:3]:
+                print(f"       - {url}")
+            if len(urls) > 3:
+                print(f"       ... and {len(urls) - 3} more")
+        print()
+
+    print("=" * 80)
+    print(f"Total: {len(results)} books")
+    if top:
+        print(f"(Showing top {top})")
+    print("=" * 80)
+
+    return results
 
 
 def find_or_create_book(title, author=None):
