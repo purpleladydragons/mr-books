@@ -202,6 +202,26 @@
       "priority": 12,
       "passes": true,
       "notes": "Implemented using ThreadPoolExecutor with RateLimiter class for thread-safe rate limiting. Posts are fetched in parallel and results are collected, then written to DB sequentially in batches of 50 to avoid SQLite concurrency issues."
+    },
+    {
+      "id": "US-013",
+      "title": "Replace VADER with Ollama LLM for sentiment analysis",
+      "description": "As a user, I want better sentiment analysis using a local LLM that understands context and nuance.",
+      "acceptanceCriteria": [
+        "Create new analyze_sentiment_ollama() function in analyzer.py that calls Ollama API (localhost:11434)",
+        "Use a small/fast model like llama3.2:3b or phi3:mini (make model configurable via --model flag)",
+        "Prompt should ask LLM to rate Tyler Cowen's sentiment toward the book on a scale of 1-10",
+        "Prompt must handle interview/transcript posts: if the post has speaker tags (e.g., 'TYLER:', 'GUEST:', 'Name:'), only extract Tyler's opinion, not the guest's",
+        "If a guest recommends a book but Tyler doesn't express an opinion, return null/skip rather than attributing guest sentiment to Tyler",
+        "For regular posts (no speaker tags), assume all opinions are Tyler's",
+        "Add --use-ollama flag to 'python main.py analyze' to opt into LLM analysis",
+        "Normalize LLM score (1-10) to match existing -1 to 1 scale for consistency",
+        "Handle Ollama connection errors gracefully with helpful error message",
+        "Script runs without errors: python main.py analyze --use-ollama --model llama3.2:3b"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Implemented analyze_sentiment_ollama() with interview/transcript detection using is_interview_or_transcript() and extract_tyler_opinion() functions. Handles speaker tags like 'TYLER:', 'TYLER COWEN:', 'TC:', 'GUEST:', etc. Normalizes LLM 1-10 scores to -1 to 1 scale. Shows helpful error messages when Ollama is not available."
     }
   ]
 }

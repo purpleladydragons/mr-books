@@ -18,6 +18,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Deduplication: Uses rapidfuzz library with token_sort_ratio for 85% similarity threshold
 - Sentiment: Use VADER via `vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer`; compound score is -1 to 1
 - Sentiment: Scores are stored at both mention level (book_mentions.sentiment_score) and book level (books.sentiment_score)
+- Sentiment (Ollama): Use analyze_sentiment_ollama() with --use-ollama flag; calls localhost:11434, handles interview transcripts
+- Interview Detection: is_interview_or_transcript() detects speaker tags; extract_tyler_opinion() filters to Tyler's sections only
 - Pagination: Use is_valid_pagination_url() to validate next page links; filters out external domains and invalid URLs
 - Parallel Scraping: Use ThreadPoolExecutor + RateLimiter class for concurrent fetching; collect results, write to DB sequentially
 ---
@@ -247,4 +249,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - RateLimiter with a lock ensures thread-safe timing across all workers
   - Processing in batches (50) helps manage memory while still achieving parallelism
   - The `as_completed()` function is key for processing results as they arrive
+---
+
+## 2026-01-19 - US-013
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented Ollama LLM sentiment analysis in analyzer.py
+- Files modified:
+  - analyzer.py: Added analyze_sentiment_ollama(), is_interview_or_transcript(), extract_tyler_opinion() functions
+  - main.py: Added --use-ollama and --model flags to analyze command
+  - db.py: Updated get_unanalyzed_mentions() to return book title for interview extraction
+- Features:
+  - analyze_sentiment_ollama(): Calls Ollama API at localhost:11434
+  - is_interview_or_transcript(): Detects speaker tags like 'TYLER:', 'GUEST:', 'TC:', etc.
+  - extract_tyler_opinion(): Extracts only Tyler's sections from transcript text
+  - If Tyler doesn't mention a book in his sections, returns None (skip) instead of guest sentiment
+  - Normalizes LLM 1-10 scores to -1 to 1 scale: (score - 5.5) / 4.5
+  - Graceful error handling with helpful messages when Ollama is not available
+  - --model flag allows choosing any Ollama model (default: llama3.2:3b)
+- **Learnings for future iterations:**
+  - Interview/transcript posts use speaker tags at line starts: 'TYLER COWEN:', 'GUEST:', 'TC:', 'Q:', 'A:'
+  - Need at least 2 speaker-tagged lines to consider text as interview
+  - When extracting Tyler's opinion, search for book title mention in his sections
+  - Ollama API at localhost:11434/api/generate accepts JSON with model, prompt, stream, options
+  - Low temperature (0.1) helps get consistent numeric ratings from LLM
+  - Use urllib instead of requests to avoid adding new dependency
 ---
