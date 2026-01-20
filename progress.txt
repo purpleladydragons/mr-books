@@ -10,6 +10,7 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Scraper: Use `cloudscraper` instead of `requests` to bypass Cloudflare protection on marginalrevolution.com
 - Scraper: Article entries are in `<article>` tags, title links have `rel='bookmark'` attribute
 - Scraper: Pagination can be found via link text "Next" or by looking for `/page/N` in href
+- Scraper: Post content is in `div.entry-content` class; use fetch_with_retry() for resilient requests
 ---
 
 ## 2026-01-19 - US-001
@@ -64,4 +65,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Post titles are in `<a rel="bookmark">` tags within `<article>` elements
   - Dates are in `<time>` tags with `datetime` attribute
   - Site has ~279 pages in the Books category
+---
+
+## 2026-01-19 - US-004
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented individual post content scraper in scraper.py
+- Files modified:
+  - scraper.py: Added scrape_post_content() and fetch_with_retry() functions
+  - db.py: Added get_posts_without_content(), get_total_post_count(), update_post_content() functions
+- Features:
+  - Fetches posts where content_text is NULL
+  - Extracts main post body from `div.entry-content` (WordPress pattern)
+  - Removes comments and sidebar elements from content
+  - Stores both HTML and cleaned text
+  - Retry logic with exponential backoff (2, 4, 8 seconds)
+  - 1-2 second random delay between requests
+  - Progress logging showing current/total posts
+- **Learnings for future iterations:**
+  - Post content is in `div.entry-content` class (standard WordPress)
+  - Some pages like "Marginal Revolution University" don't have entry-content (promotional pages)
+  - fetch_with_retry() can be reused for other network requests that need resilience
+  - Pagination on listing pages sometimes picks up external links (e.g., Amazon) - the scraper gracefully handles this
 ---

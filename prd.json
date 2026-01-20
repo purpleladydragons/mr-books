@@ -69,7 +69,7 @@
         "Script runs without errors: python main.py scrape"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
