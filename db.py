@@ -143,7 +143,60 @@ def update_post_content(post_id, content_html, content_text):
 
 def get_scrape_status():
     """Get the current scrape status and print it to terminal."""
-    pass
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get total posts in DB
+    cursor.execute('SELECT COUNT(*) FROM posts')
+    total_posts = cursor.fetchone()[0]
+
+    # Get posts with content scraped
+    cursor.execute('SELECT COUNT(*) FROM posts WHERE content_text IS NOT NULL')
+    posts_with_content = cursor.fetchone()[0]
+
+    # Get number of pages scraped
+    cursor.execute('SELECT COUNT(*) FROM scrape_progress')
+    pages_scraped = cursor.fetchone()[0]
+
+    # Get last scrape timestamp
+    cursor.execute('''
+        SELECT MAX(scraped_at) FROM posts WHERE scraped_at IS NOT NULL
+    ''')
+    last_scrape = cursor.fetchone()[0]
+
+    # Get last page scrape timestamp
+    cursor.execute('''
+        SELECT MAX(completed_at) FROM scrape_progress
+    ''')
+    last_page_scrape = cursor.fetchone()[0]
+
+    conn.close()
+
+    # Print formatted status
+    print("=" * 50)
+    print("Marginal Revolution Scraper Status")
+    print("=" * 50)
+    print(f"Pages scraped:        {pages_scraped}")
+    print(f"Posts found:          {total_posts}")
+    print(f"Posts with content:   {posts_with_content}")
+    if total_posts > 0:
+        pct = (posts_with_content / total_posts) * 100
+        print(f"Content coverage:     {pct:.1f}%")
+    print("-" * 50)
+    if last_scrape:
+        print(f"Last content scrape:  {last_scrape}")
+    elif last_page_scrape:
+        print(f"Last listing scrape:  {last_page_scrape}")
+    else:
+        print("No scrapes completed yet")
+    print("=" * 50)
+
+    return {
+        'total_posts': total_posts,
+        'posts_with_content': posts_with_content,
+        'pages_scraped': pages_scraped,
+        'last_scrape': last_scrape
+    }
 
 
 def get_ranked_books(top=None, genre=None):
