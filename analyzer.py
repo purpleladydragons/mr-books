@@ -235,9 +235,115 @@ def analyze_book_mentions():
     print("Done!")
 
 
-def categorize_book(book_id, content_text):
-    """Categorize a book by genre based on content keywords."""
-    pass
+def categorize_book(content_text):
+    """Categorize a book by genre based on content keywords.
+
+    Uses keyword matching on post content to assign one of:
+    history, economics, fiction, biography, science, philosophy, other
+
+    Args:
+        content_text: The text content of posts mentioning this book
+
+    Returns:
+        A genre string
+    """
+    if not content_text:
+        return 'other'
+
+    text_lower = content_text.lower()
+
+    # Genre keywords - ordered by specificity
+    genre_keywords = {
+        'biography': [
+            'biography', 'biographies', 'autobiograph', 'memoir', 'life of',
+            'life story', 'personal history', 'born in', 'childhood',
+            'his life', 'her life', 'their life', 'my life'
+        ],
+        'economics': [
+            'econom', 'market', 'gdp', 'inflation', 'monetary', 'fiscal',
+            'trade', 'capitalism', 'socialist', 'price', 'supply', 'demand',
+            'wealth', 'poverty', 'inequality', 'growth', 'recession',
+            'finance', 'banking', 'investment', 'stocks', 'bonds',
+            'entrepreneur', 'business', 'corporation'
+        ],
+        'history': [
+            'history', 'histor', 'century', 'ancient', 'medieval', 'war',
+            'empire', 'dynasty', 'revolution', 'colonial', 'civilization',
+            'world war', 'civil war', 'historical', 'era', 'period',
+            'archaeological', 'antiquity'
+        ],
+        'science': [
+            'science', 'scientific', 'physics', 'chemistry', 'biology',
+            'evolution', 'genetic', 'quantum', 'neuroscience', 'brain',
+            'experiment', 'research', 'hypothesis', 'theory', 'discovery',
+            'mathematician', 'mathematics', 'algorithm', 'computer',
+            'technology', 'engineering', 'medical', 'disease', 'psychology'
+        ],
+        'philosophy': [
+            'philosophy', 'philosophical', 'ethics', 'moral', 'metaphysics',
+            'epistemology', 'ontology', 'existential', 'meaning of life',
+            'consciousness', 'free will', 'determinism', 'justice',
+            'virtue', 'aesthetic', 'logic', 'reason', 'truth'
+        ],
+        'fiction': [
+            'novel', 'fiction', 'story', 'narrator', 'character',
+            'protagonist', 'plot', 'narrative', 'literary', 'literature',
+            'tale', 'prose', 'short stories', 'imaginary', 'fictitious'
+        ]
+    }
+
+    # Count matches for each genre
+    genre_scores = {}
+    for genre, keywords in genre_keywords.items():
+        score = 0
+        for keyword in keywords:
+            # Count occurrences
+            count = text_lower.count(keyword)
+            score += count
+        genre_scores[genre] = score
+
+    # Find genre with highest score
+    best_genre = 'other'
+    best_score = 0
+
+    for genre, score in genre_scores.items():
+        if score > best_score:
+            best_score = score
+            best_genre = genre
+
+    # Only return a specific genre if we have at least some keyword matches
+    if best_score < 2:
+        return 'other'
+
+    return best_genre
+
+
+def categorize_all_books():
+    """Categorize all books that don't have a genre yet."""
+    from db import get_books_without_genre, get_book_contexts, update_book_genre
+
+    books = get_books_without_genre()
+    total = len(books)
+
+    if total == 0:
+        print("No books without genres found.")
+        return
+
+    print(f"Categorizing {total} books by genre...")
+
+    for i, (book_id,) in enumerate(books, 1):
+        # Get all contexts for this book
+        contexts = get_book_contexts(book_id)
+        combined_content = ' '.join(contexts)
+
+        # Categorize based on combined content
+        genre = categorize_book(combined_content)
+        update_book_genre(book_id, genre)
+
+        if i % 100 == 0 or i == total:
+            print(f"Categorized {i}/{total} books")
+
+    print("Done!")
 
 
 def analyze_all_posts():
@@ -266,3 +372,7 @@ def analyze_all_posts():
     # Now analyze sentiment for all book mentions
     print("\n--- Sentiment Analysis ---")
     analyze_book_mentions()
+
+    # Categorize books by genre
+    print("\n--- Genre Categorization ---")
+    categorize_all_books()

@@ -497,3 +497,56 @@ def update_book_sentiment():
 
     conn.commit()
     conn.close()
+
+
+def get_books_without_genre():
+    """Get all books that don't have a genre assigned yet."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id FROM books
+        WHERE genre IS NULL
+        ORDER BY id
+    ''')
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+
+def get_book_contexts(book_id):
+    """Get all context texts for a book's mentions.
+
+    Also includes the post content for richer keyword matching.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bm.context_text, p.content_text
+        FROM book_mentions bm
+        JOIN posts p ON bm.post_id = p.id
+        WHERE bm.book_id = ?
+    ''', (book_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Combine both context_text and post content_text
+    contexts = []
+    for context_text, post_content in rows:
+        if context_text:
+            contexts.append(context_text)
+        if post_content:
+            contexts.append(post_content)
+    return contexts
+
+
+def update_book_genre(book_id, genre):
+    """Update the genre for a book."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE books
+        SET genre = ?
+        WHERE id = ?
+    ''', (genre, book_id))
+    conn.commit()
+    conn.close()
