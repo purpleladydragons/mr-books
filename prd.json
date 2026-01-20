@@ -1,0 +1,173 @@
+{
+  "project": "Marginal Revolution Book Reviews",
+  "branchName": "ralph/mr-book-reviews-scraper",
+  "description": "Scrape Marginal Revolution book reviews, analyze sentiment, and rank books by how positively Tyler Cowen feels about them",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create project structure and requirements.txt",
+      "description": "As a developer, I need the Python project scaffolding with all required dependencies.",
+      "acceptanceCriteria": [
+        "Create requirements.txt with: requests, beautifulsoup4, vaderSentiment, spacy, lxml",
+        "Create main.py with CLI argument parsing using argparse (subcommands: scrape, analyze, rankings, status)",
+        "Create db.py module for database operations",
+        "Create scraper.py module for web scraping",
+        "Create analyzer.py module for NLP and sentiment analysis",
+        "Script runs without errors: python main.py --help"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create SQLite database schema",
+      "description": "As a developer, I need the database schema to store posts, books, and their relationships.",
+      "acceptanceCriteria": [
+        "Create init_db() function in db.py that creates SQLite database file (mr_books.db)",
+        "Create posts table with: id, url (unique), title, date_published, content_html, content_text, scraped_at",
+        "Create books table with: id, title, author, sentiment_score, genre, created_at",
+        "Create book_mentions table with: id, book_id, post_id, context_text, sentiment_score, UNIQUE(book_id, post_id)",
+        "Create scrape_progress table with: id, page_number, completed_at",
+        "Database initializes successfully when running: python -c 'from db import init_db; init_db()'",
+        "Script runs without errors"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Scrape category listing pages",
+      "description": "As a user, I want to scrape all post URLs from the Books category pages.",
+      "acceptanceCriteria": [
+        "Create scrape_category_listing() function in scraper.py",
+        "Fetches https://marginalrevolution.com/marginalrevolution/category/books and subsequent pages",
+        "Extracts post URL, title, and date from each listing item",
+        "Handles pagination by finding 'next page' link until no more pages",
+        "Implements 1-2 second delay between requests",
+        "Stores scraped page numbers in scrape_progress table",
+        "Logs progress to terminal (e.g., 'Scraped page 5, found 10 posts')",
+        "Script runs without errors: python main.py scrape --listing-only"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Scrape individual post content",
+      "description": "As a user, I want to fetch and store the full content of each post.",
+      "acceptanceCriteria": [
+        "Create scrape_post_content() function in scraper.py",
+        "Fetches each post URL from the posts table where content_text is NULL",
+        "Extracts main post body content (not sidebar or comments)",
+        "Stores both HTML and cleaned text in posts table",
+        "Implements retry logic for network errors (3 retries with exponential backoff)",
+        "Implements 1-2 second delay between requests",
+        "Logs progress (e.g., 'Scraped post 150/1200: [title]')",
+        "Script runs without errors: python main.py scrape"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement status command",
+      "description": "As a user, I want to check the progress of scraping.",
+      "acceptanceCriteria": [
+        "Create get_scrape_status() function in db.py",
+        "Returns: total posts in DB, posts with content scraped, last scrape timestamp",
+        "python main.py status prints formatted status to terminal",
+        "Shows number of pages scraped, posts found, posts with content",
+        "Script runs without errors"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Extract book titles using NLP",
+      "description": "As a user, I want the system to identify book titles in posts.",
+      "acceptanceCriteria": [
+        "Create extract_books_from_post() function in analyzer.py",
+        "Uses spaCy NER to find WORK_OF_ART entities as potential book titles",
+        "Also detects italicized text (<em> or <i> tags) as potential book titles",
+        "Detects patterns like 'I recommend [title]', 'just finished [title]', 'new book [title]'",
+        "Stores extracted book titles in books table",
+        "Creates book_mentions records linking books to posts",
+        "Stores context (surrounding paragraph) in book_mentions.context_text",
+        "Script runs without errors"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement book deduplication",
+      "description": "As a user, I want books mentioned across multiple posts to be recognized as the same book.",
+      "acceptanceCriteria": [
+        "Create find_or_create_book() function in db.py",
+        "Uses fuzzy string matching to detect similar titles (e.g., 'The Great Gatsby' vs 'Great Gatsby')",
+        "Normalizes titles (lowercase, strip articles) before comparison",
+        "If match found with >85% similarity, links to existing book instead of creating new",
+        "Script runs without errors"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Perform sentiment analysis on book mentions",
+      "description": "As a user, I want sentiment scores calculated for each book.",
+      "acceptanceCriteria": [
+        "Create analyze_sentiment() function in analyzer.py",
+        "Uses VADER SentimentIntensityAnalyzer on each book_mention.context_text",
+        "Stores compound score (-1 to 1) in book_mentions.sentiment_score",
+        "Calculates average sentiment across all mentions for each book",
+        "Stores aggregated score in books.sentiment_score",
+        "python main.py analyze processes all unanalyzed book_mentions",
+        "Script runs without errors"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Display ranked book list",
+      "description": "As a user, I want to see books ranked by sentiment score.",
+      "acceptanceCriteria": [
+        "Create get_ranked_books() function in db.py",
+        "Returns books sorted by sentiment_score descending",
+        "Includes all post URLs where each book is mentioned",
+        "python main.py rankings prints: rank, title, score, post links",
+        "Supports --top N flag to limit results (e.g., --top 50)",
+        "Output is readable in terminal (aligned or formatted list)",
+        "Script runs without errors"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "(Nice to Have) Categorize books by genre",
+      "description": "As a user, I want books tagged with genres for filtering.",
+      "acceptanceCriteria": [
+        "Create categorize_book() function in analyzer.py",
+        "Uses keyword matching on post content to assign genres: history, economics, fiction, biography, science, philosophy, other",
+        "Stores genre in books.genre column",
+        "python main.py rankings --genre [genre] filters results",
+        "Script runs without errors"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
