@@ -285,6 +285,26 @@
       "priority": 16,
       "passes": true,
       "notes": "Implemented comparisons table for storing pairwise results. Created sample_pairs() for random sampling, compare_pair_with_llm() for LLM-based comparison, compare_pairs_parallel() for parallel execution with rate limiting, and fit_bradley_terry() using choix library. Added 'python main.py rank --comparisons N --workers N' command. Rankings command auto-detects and uses bt_score when available. Comparisons stored incrementally - can stop and resume to improve rankings over time."
+    },
+    {
+      "id": "US-017",
+      "title": "Implement adaptive/uncertainty sampling for Bradley-Terry comparisons",
+      "description": "As a user, I want smarter sampling that focuses comparisons on 'close calls' to improve ranking accuracy with fewer LLM calls.",
+      "acceptanceCriteria": [
+        "Create sample_pairs_adaptive() function as alternative to random sampling",
+        "Adaptive sampling prioritizes pairs where current BT scores are similar (uncertain rankings)",
+        "Calculate uncertainty as: 1 / abs(score_a - score_b) or similar metric",
+        "Higher uncertainty pairs have higher probability of being sampled",
+        "Ensure all items still get minimum coverage (e.g., at least 5 comparisons each) before focusing on uncertain pairs",
+        "Add --adaptive flag to rank command: python main.py rank --comparisons 10000 --adaptive",
+        "Re-fit BT model periodically during sampling (every 1000 comparisons) to update uncertainty estimates",
+        "Track and log comparison efficiency: uncertainty reduction per comparison",
+        "Fallback to random sampling for new items with no comparisons yet",
+        "Script runs without errors: python main.py rank --comparisons 10000 --adaptive --workers 5"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Implemented sample_pairs_adaptive() with three-tier sampling strategy: (1) coverage-focused sampling for items with < 5 comparisons (60% probability), (2) uncertainty-focused sampling using exponential weighting on score differences (80% of remaining), and (3) random fallback. Uses _sample_uncertain_pair() for weighted sampling based on inverse score differences. compute_uncertainty_metric() tracks overall ranking uncertainty. _run_adaptive_ranking() handles periodic BT model refitting every 1000 comparisons and logs uncertainty reduction metrics. Added --adaptive flag to rank command in main.py."
     }
   ]
 }

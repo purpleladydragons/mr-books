@@ -936,3 +936,42 @@ def has_bt_scores():
     count = cursor.fetchone()[0]
     conn.close()
     return count > 0
+
+
+def get_mention_comparison_counts():
+    """Get the number of comparisons each mention has participated in.
+
+    Returns:
+        Dict mapping mention_id to comparison count
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Count comparisons for each mention (as either A or B)
+    cursor.execute('''
+        SELECT mention_id, COUNT(*) as count FROM (
+            SELECT mention_a_id as mention_id FROM comparisons
+            UNION ALL
+            SELECT mention_b_id as mention_id FROM comparisons
+        )
+        GROUP BY mention_id
+    ''')
+    counts = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return counts
+
+
+def get_mentions_with_bt_scores():
+    """Get all mentions with their current BT scores.
+
+    Returns:
+        Dict mapping mention_id to bt_score (or None if not scored)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, bt_score FROM book_mentions
+    ''')
+    scores = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return scores

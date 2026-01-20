@@ -62,7 +62,8 @@ def cmd_rank(args):
     run_pairwise_ranking(
         n_comparisons=args.comparisons,
         model=args.model,
-        workers=args.workers
+        workers=args.workers,
+        adaptive=args.adaptive
     )
 
 
@@ -175,6 +176,11 @@ def main():
         type=int,
         default=5,
         help='Number of parallel workers for LLM calls (default: 5)'
+    )
+    rank_parser.add_argument(
+        '--adaptive',
+        action='store_true',
+        help='Use adaptive/uncertainty sampling (focuses on uncertain rankings, refits model every 1000 comparisons)'
     )
     rank_parser.set_defaults(func=cmd_rank)
 

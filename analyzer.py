@@ -939,6 +939,196 @@ def sample_pairs(mention_ids, n_pairs):
     return pairs
 
 
+def sample_pairs_adaptive(mention_ids, n_pairs, bt_scores, comparison_counts, min_coverage=5):
+    """Sample pairs using adaptive/uncertainty sampling.
+
+    Prioritizes pairs where:
+    1. Items have fewer than min_coverage comparisons (ensure coverage)
+    2. Current BT scores are similar (uncertain rankings)
+
+    Args:
+        mention_ids: List of mention IDs to sample from
+        n_pairs: Number of pairs to sample
+        bt_scores: Dict mapping mention_id to bt_score (None for unscored)
+        comparison_counts: Dict mapping mention_id to comparison count
+        min_coverage: Minimum comparisons per item before focusing on uncertainty
+
+    Returns:
+        Tuple: (pairs, stats) where pairs is List[(mention_a_id, mention_b_id)]
+               and stats is dict with sampling statistics
+    """
+    import random
+    import math
+
+    if len(mention_ids) < 2:
+        return [], {'random': 0, 'coverage': 0, 'uncertainty': 0}
+
+    # Categorize mentions by coverage
+    low_coverage = []  # Items with < min_coverage comparisons
+    has_coverage = []  # Items with >= min_coverage comparisons
+
+    for mid in mention_ids:
+        count = comparison_counts.get(mid, 0)
+        if count < min_coverage:
+            low_coverage.append(mid)
+        else:
+            has_coverage.append(mid)
+
+    # For items with scores, compute uncertainty weights
+    # Higher weight = more uncertain (closer scores)
+    scored_items = [(mid, bt_scores.get(mid)) for mid in has_coverage
+                    if bt_scores.get(mid) is not None]
+
+    pairs = []
+    stats = {'random': 0, 'coverage': 0, 'uncertainty': 0}
+
+    for _ in range(n_pairs):
+        pair = None
+
+        # Strategy 1: If many items lack coverage, prioritize them (60% chance)
+        if low_coverage and random.random() < 0.6:
+            # Sample one from low_coverage and one from anywhere
+            a = random.choice(low_coverage)
+            # Prefer pairing with scored items if available
+            if scored_items and random.random() < 0.7:
+                b, _ = random.choice(scored_items)
+            else:
+                b = random.choice([m for m in mention_ids if m != a])
+            pair = (a, b)
+            stats['coverage'] += 1
+
+        # Strategy 2: Sample based on uncertainty (items with similar scores)
+        elif len(scored_items) >= 2 and random.random() < 0.8:
+            # Weighted sampling - higher weight for pairs with similar scores
+            # Use softmax-like weighting based on score similarity
+            pair = _sample_uncertain_pair(scored_items)
+            if pair:
+                stats['uncertainty'] += 1
+
+        # Strategy 3: Random fallback
+        if pair is None:
+            a, b = random.sample(mention_ids, 2)
+            pair = (a, b)
+            stats['random'] += 1
+
+        # Order pair consistently
+        if pair[0] > pair[1]:
+            pair = (pair[1], pair[0])
+        pairs.append(pair)
+
+    return pairs, stats
+
+
+def _sample_uncertain_pair(scored_items):
+    """Sample a pair based on uncertainty (similar BT scores).
+
+    Uses inverse score difference as weight - pairs with similar scores
+    are more likely to be sampled.
+
+    Args:
+        scored_items: List of tuples (mention_id, bt_score)
+
+    Returns:
+        Tuple (mention_a_id, mention_b_id) or None if cannot sample
+    """
+    import random
+    import math
+
+    if len(scored_items) < 2:
+        return None
+
+    # For efficiency, don't compute all pairs - sample candidates
+    n_candidates = min(50, len(scored_items) * (len(scored_items) - 1) // 2)
+
+    candidates = []
+    weights = []
+
+    for _ in range(n_candidates):
+        # Sample two different items
+        i, j = random.sample(range(len(scored_items)), 2)
+        mid_a, score_a = scored_items[i]
+        mid_b, score_b = scored_items[j]
+
+        if score_a is None or score_b is None:
+            continue
+
+        # Calculate uncertainty weight (inverse of score difference)
+        # Add small epsilon to avoid division by zero
+        diff = abs(score_a - score_b)
+        # Use exponential weighting - much higher weight for close pairs
+        weight = math.exp(-5 * diff)  # e^(-5*diff) gives high weight when diff is small
+
+        candidates.append((mid_a, mid_b))
+        weights.append(weight)
+
+    if not candidates:
+        return None
+
+    # Weighted random choice
+    total_weight = sum(weights)
+    if total_weight == 0:
+        return random.choice(candidates)
+
+    r = random.random() * total_weight
+    cumulative = 0
+    for pair, weight in zip(candidates, weights):
+        cumulative += weight
+        if r <= cumulative:
+            return pair
+
+    return candidates[-1]  # Fallback
+
+
+def compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage=5):
+    """Compute overall uncertainty metric for the current ranking.
+
+    Higher values indicate more uncertainty in the ranking.
+
+    Args:
+        bt_scores: Dict mapping mention_id to bt_score
+        comparison_counts: Dict mapping mention_id to comparison count
+        min_coverage: Minimum coverage threshold
+
+    Returns:
+        Dict with uncertainty metrics
+    """
+    import math
+
+    scored = [(mid, score) for mid, score in bt_scores.items()
+              if score is not None]
+
+    if len(scored) < 2:
+        return {'total_uncertainty': float('inf'), 'avg_gap': 0, 'coverage_pct': 0}
+
+    # Sort by score
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Compute average gap between adjacent items
+    gaps = []
+    for i in range(len(scored) - 1):
+        gap = abs(scored[i][1] - scored[i + 1][1])
+        gaps.append(gap)
+
+    avg_gap = sum(gaps) / len(gaps) if gaps else 0
+
+    # Compute uncertainty as sum of inverse gaps (more uncertainty when gaps are small)
+    total_uncertainty = sum(1 / (g + 0.01) for g in gaps)
+
+    # Coverage percentage
+    all_mentions = set(bt_scores.keys())
+    covered = sum(1 for mid in all_mentions
+                  if comparison_counts.get(mid, 0) >= min_coverage)
+    coverage_pct = (covered / len(all_mentions) * 100) if all_mentions else 0
+
+    return {
+        'total_uncertainty': total_uncertainty,
+        'avg_gap': avg_gap,
+        'coverage_pct': coverage_pct,
+        'n_scored': len(scored),
+        'n_low_coverage': len(all_mentions) - covered
+    }
+
+
 def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b'):
     """Ask LLM which review is more positive about its book.
 
@@ -1146,13 +1336,14 @@ def fit_bradley_terry(comparisons, mention_ids):
         return {}
 
 
-def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5):
+def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False):
     """Run pairwise comparison ranking process.
 
     Args:
         n_comparisons: Number of pairwise comparisons to make
         model: Ollama model to use
         workers: Number of parallel workers
+        adaptive: If True, use adaptive/uncertainty sampling with periodic refitting
     """
     from db import (
         get_mentions_for_bt,
@@ -1160,7 +1351,9 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5):
         get_comparison_count,
         insert_comparisons_batch,
         update_mention_bt_scores_batch,
-        update_book_bt_scores
+        update_book_bt_scores,
+        get_mention_comparison_counts,
+        get_mentions_with_bt_scores
     )
 
     # Check Ollama availability first
@@ -1184,18 +1377,178 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5):
     existing_count = get_comparison_count()
     print(f"Existing comparisons: {existing_count}")
 
-    # Sample new pairs
-    print(f"Sampling {n_comparisons} pairs for comparison...")
-    pairs = sample_pairs(mention_ids, n_comparisons)
+    if adaptive:
+        # Run adaptive sampling with periodic refitting
+        print(f"\n=== ADAPTIVE SAMPLING MODE ===")
+        print(f"Will refit BT model every 1000 comparisons to update uncertainty estimates.")
+        _run_adaptive_ranking(mention_ids, n_comparisons, model, workers)
+    else:
+        # Original random sampling approach
+        print(f"Sampling {n_comparisons} pairs for comparison (random)...")
+        pairs = sample_pairs(mention_ids, n_comparisons)
 
-    # Run comparisons in parallel
-    print(f"Running pairwise comparisons with {workers} workers...")
-    results = compare_pairs_parallel(pairs, model=model, workers=workers)
+        # Run comparisons in parallel
+        print(f"Running pairwise comparisons with {workers} workers...")
+        results = compare_pairs_parallel(pairs, model=model, workers=workers)
 
-    # Store results
-    if results:
-        print(f"Storing {len(results)} comparison results...")
-        insert_comparisons_batch(results)
+        # Store results
+        if results:
+            print(f"Storing {len(results)} comparison results...")
+            insert_comparisons_batch(results)
+
+        # Final fit
+        _fit_and_update_scores(mention_ids)
+
+
+def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5):
+    """Run adaptive ranking with periodic BT model refitting.
+
+    Args:
+        mention_ids: List of mention IDs
+        n_comparisons: Total number of comparisons to make
+        model: Ollama model to use
+        workers: Number of parallel workers
+        refit_interval: Refit BT model every N comparisons
+        min_coverage: Minimum comparisons per item before focusing on uncertainty
+    """
+    from db import (
+        get_all_comparisons,
+        insert_comparisons_batch,
+        update_mention_bt_scores_batch,
+        get_mention_comparison_counts,
+        get_mentions_with_bt_scores
+    )
+
+    total_completed = 0
+    total_stats = {'random': 0, 'coverage': 0, 'uncertainty': 0}
+    uncertainty_log = []  # Track uncertainty over time
+
+    # Get initial BT scores and comparison counts
+    bt_scores = get_mentions_with_bt_scores()
+    comparison_counts = get_mention_comparison_counts()
+
+    # If we have existing comparisons but no BT scores, fit initial model
+    all_comparisons = get_all_comparisons()
+    if all_comparisons and not any(bt_scores.get(mid) is not None for mid in mention_ids):
+        print("Fitting initial BT model from existing comparisons...")
+        scores = fit_bradley_terry(all_comparisons, mention_ids)
+        if scores:
+            score_tuples = list(scores.items())
+            for i in range(0, len(score_tuples), 1000):
+                chunk = score_tuples[i:i+1000]
+                update_mention_bt_scores_batch(chunk)
+            bt_scores = scores
+
+    # Log initial uncertainty
+    initial_metrics = compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage)
+    print(f"\nInitial state:")
+    print(f"  Scored items: {initial_metrics['n_scored']}")
+    print(f"  Low coverage items: {initial_metrics['n_low_coverage']}")
+    print(f"  Coverage: {initial_metrics['coverage_pct']:.1f}%")
+    if initial_metrics['n_scored'] > 0:
+        print(f"  Total uncertainty: {initial_metrics['total_uncertainty']:.2f}")
+        print(f"  Avg gap between ranks: {initial_metrics['avg_gap']:.4f}")
+    uncertainty_log.append((0, initial_metrics))
+
+    while total_completed < n_comparisons:
+        # Calculate batch size (up to refit_interval or remaining)
+        batch_size = min(refit_interval, n_comparisons - total_completed)
+
+        print(f"\n--- Batch {total_completed // refit_interval + 1}: {batch_size} comparisons ---")
+
+        # Sample pairs using adaptive strategy
+        pairs, batch_stats = sample_pairs_adaptive(
+            mention_ids, batch_size, bt_scores, comparison_counts, min_coverage
+        )
+
+        # Update totals
+        for key in batch_stats:
+            total_stats[key] += batch_stats[key]
+
+        print(f"Sampling strategy: {batch_stats['coverage']} coverage, "
+              f"{batch_stats['uncertainty']} uncertainty, {batch_stats['random']} random")
+
+        # Run comparisons
+        print(f"Running comparisons with {workers} workers...")
+        results = compare_pairs_parallel(pairs, model=model, workers=workers)
+
+        # Store results
+        if results:
+            print(f"Storing {len(results)} comparison results...")
+            insert_comparisons_batch(results)
+
+        total_completed += batch_size
+
+        # Update comparison counts
+        for a, b, _ in results:
+            comparison_counts[a] = comparison_counts.get(a, 0) + 1
+            comparison_counts[b] = comparison_counts.get(b, 0) + 1
+
+        # Refit BT model
+        print("Refitting Bradley-Terry model...")
+        all_comparisons = get_all_comparisons()
+        scores = fit_bradley_terry(all_comparisons, mention_ids)
+
+        if scores:
+            # Update in-memory scores
+            bt_scores = scores
+
+            # Persist to DB
+            score_tuples = list(scores.items())
+            for i in range(0, len(score_tuples), 1000):
+                chunk = score_tuples[i:i+1000]
+                update_mention_bt_scores_batch(chunk)
+
+        # Compute and log uncertainty
+        metrics = compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage)
+        uncertainty_log.append((total_completed, metrics))
+
+        print(f"Progress: {total_completed}/{n_comparisons} comparisons")
+        print(f"  Coverage: {metrics['coverage_pct']:.1f}%")
+        if metrics['n_scored'] > 0:
+            print(f"  Total uncertainty: {metrics['total_uncertainty']:.2f}")
+            # Calculate uncertainty reduction
+            if len(uncertainty_log) >= 2 and uncertainty_log[-2][1]['total_uncertainty'] > 0:
+                prev_uncertainty = uncertainty_log[-2][1]['total_uncertainty']
+                reduction = (prev_uncertainty - metrics['total_uncertainty']) / prev_uncertainty * 100
+                print(f"  Uncertainty reduction: {reduction:+.1f}%")
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("ADAPTIVE SAMPLING COMPLETE")
+    print("=" * 60)
+    print(f"\nTotal comparisons made: {total_completed}")
+    print(f"Sampling strategy breakdown:")
+    print(f"  Coverage-focused: {total_stats['coverage']} ({total_stats['coverage']/total_completed*100:.1f}%)")
+    print(f"  Uncertainty-focused: {total_stats['uncertainty']} ({total_stats['uncertainty']/total_completed*100:.1f}%)")
+    print(f"  Random: {total_stats['random']} ({total_stats['random']/total_completed*100:.1f}%)")
+
+    # Show uncertainty reduction over time
+    if len(uncertainty_log) >= 2:
+        initial = uncertainty_log[0][1]
+        final = uncertainty_log[-1][1]
+        if initial['total_uncertainty'] > 0 and final['total_uncertainty'] < float('inf'):
+            total_reduction = (initial['total_uncertainty'] - final['total_uncertainty']) / initial['total_uncertainty'] * 100
+            print(f"\nUncertainty reduction: {initial['total_uncertainty']:.2f} → {final['total_uncertainty']:.2f} ({total_reduction:+.1f}%)")
+            efficiency = total_reduction / total_completed * 1000 if total_completed > 0 else 0
+            print(f"Efficiency: {efficiency:.2f}% uncertainty reduction per 1000 comparisons")
+
+    # Aggregate to book level
+    from db import update_book_bt_scores
+    print("\nAggregating scores to book level...")
+    update_book_bt_scores()
+
+    print("\nDone! Bradley-Terry ranking complete.")
+    print(f"Run 'python main.py rankings' to see the results.")
+
+
+def _fit_and_update_scores(mention_ids):
+    """Fit BT model and update scores in database."""
+    from db import (
+        get_all_comparisons,
+        update_mention_bt_scores_batch,
+        update_book_bt_scores
+    )
 
     # Get all comparisons (including previous runs)
     all_comparisons = get_all_comparisons()
