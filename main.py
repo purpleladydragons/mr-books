@@ -21,7 +21,7 @@ def cmd_scrape(args):
         scrape_category_listing()
     else:
         scrape_category_listing()
-        scrape_post_content()
+        scrape_post_content(workers=args.workers)
 
 
 def cmd_analyze(args):
@@ -65,6 +65,12 @@ def main():
         '--listing-only',
         action='store_true',
         help='Only scrape category listing pages, not post content'
+    )
+    scrape_parser.add_argument(
+        '--workers',
+        type=int,
+        default=5,
+        help='Number of concurrent workers for scraping post content (default: 5)'
     )
     scrape_parser.set_defaults(func=cmd_scrape)
 

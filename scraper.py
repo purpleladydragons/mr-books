@@ -4,6 +4,8 @@ Web scraping module for Marginal Revolution Book Reviews.
 
 import time
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import cloudscraper
 from bs4 import BeautifulSoup
 from db import (insert_post, record_page_scraped, get_last_scraped_page,
@@ -21,6 +23,25 @@ scraper = cloudscraper.create_scraper(
         'desktop': True
     }
 )
+
+
+class RateLimiter:
+    """Thread-safe rate limiter to control request rate across workers."""
+
+    def __init__(self, requests_per_second=5):
+        self.min_interval = 1.0 / requests_per_second
+        self.lock = threading.Lock()
+        self.last_request_time = 0
+
+    def wait(self):
+        """Wait if necessary to maintain rate limit."""
+        with self.lock:
+            now = time.time()
+            elapsed = now - self.last_request_time
+            if elapsed < self.min_interval:
+                sleep_time = self.min_interval - elapsed
+                time.sleep(sleep_time)
+            self.last_request_time = time.time()
 
 
 def is_valid_pagination_url(url, expected_page=None):
@@ -216,8 +237,72 @@ def fetch_with_retry(url, max_retries=3):
                 return None
 
 
-def scrape_post_content():
-    """Scrape the full content of each post."""
+def _fetch_single_post(post_data, rate_limiter):
+    """Fetch and parse a single post's content. Used by parallel scraper.
+
+    Args:
+        post_data: Tuple of (post_id, url, title)
+        rate_limiter: RateLimiter instance to control request rate
+
+    Returns:
+        Tuple of (post_id, content_html, content_text, title, success)
+    """
+    post_id, url, title = post_data
+
+    # Wait for rate limiter before making request
+    rate_limiter.wait()
+
+    response = fetch_with_retry(url)
+    if response is None:
+        return (post_id, "", "", title, False)
+
+    soup = BeautifulSoup(response.text, 'lxml')
+
+    # Find the main post content - MR uses article or entry-content
+    content_html = ""
+    content_text = ""
+
+    # Try to find the post content in various possible containers
+    content_elem = None
+
+    # Try entry-content class (common WordPress pattern)
+    content_elem = soup.find('div', class_='entry-content')
+
+    if not content_elem:
+        # Try article tag
+        article = soup.find('article')
+        if article:
+            content_elem = article.find('div', class_='entry-content') or article
+
+    if not content_elem:
+        # Try post-content class
+        content_elem = soup.find('div', class_='post-content')
+
+    if not content_elem:
+        # Try the-content class
+        content_elem = soup.find('div', class_='the-content')
+
+    if content_elem:
+        # Remove comments section if present
+        for comments in content_elem.find_all(['div', 'section'], class_=lambda x: x and 'comment' in x.lower() if x else False):
+            comments.decompose()
+
+        # Remove sidebar elements if present
+        for sidebar in content_elem.find_all(['aside', 'div'], class_=lambda x: x and 'sidebar' in x.lower() if x else False):
+            sidebar.decompose()
+
+        content_html = str(content_elem)
+        content_text = content_elem.get_text(separator='\n', strip=True)
+
+    return (post_id, content_html, content_text, title, True)
+
+
+def scrape_post_content(workers=5):
+    """Scrape the full content of each post using parallel workers.
+
+    Args:
+        workers: Number of concurrent workers (default 5)
+    """
     posts = get_posts_without_content()
     total_posts = get_total_post_count()
     posts_to_scrape = len(posts)
@@ -227,61 +312,46 @@ def scrape_post_content():
         return
 
     print(f"Found {posts_to_scrape} posts to scrape (out of {total_posts} total)")
+    print(f"Using {workers} concurrent workers")
 
-    for idx, (post_id, url, title) in enumerate(posts, 1):
-        scraped_count = total_posts - posts_to_scrape + idx
-        print(f"Scraping post {scraped_count}/{total_posts}: {title[:50]}...")
+    # Create rate limiter: ~5 requests per second total across all workers
+    rate_limiter = RateLimiter(requests_per_second=5)
 
-        response = fetch_with_retry(url)
-        if response is None:
-            print(f"  Skipping post due to network errors")
-            continue
+    # Track progress
+    completed_count = 0
+    failed_count = 0
+    base_count = total_posts - posts_to_scrape
 
-        soup = BeautifulSoup(response.text, 'lxml')
+    # Process posts in batches to avoid memory issues with very large queues
+    batch_size = 50
 
-        # Find the main post content - MR uses article or entry-content
-        content_html = ""
-        content_text = ""
+    for batch_start in range(0, posts_to_scrape, batch_size):
+        batch_end = min(batch_start + batch_size, posts_to_scrape)
+        batch = posts[batch_start:batch_end]
+        results = []
 
-        # Try to find the post content in various possible containers
-        content_elem = None
+        # Fetch posts in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_post = {
+                executor.submit(_fetch_single_post, post, rate_limiter): post
+                for post in batch
+            }
 
-        # Try entry-content class (common WordPress pattern)
-        content_elem = soup.find('div', class_='entry-content')
+            for future in as_completed(future_to_post):
+                post_id, content_html, content_text, title, success = future.result()
+                results.append((post_id, content_html, content_text, title, success))
 
-        if not content_elem:
-            # Try article tag
-            article = soup.find('article')
-            if article:
-                content_elem = article.find('div', class_='entry-content') or article
+                completed_count += 1
+                current_num = base_count + completed_count
+                if success:
+                    print(f"Scraped {current_num}/{total_posts}: {title[:50]}...")
+                else:
+                    failed_count += 1
+                    print(f"Failed {current_num}/{total_posts}: {title[:50]}...")
 
-        if not content_elem:
-            # Try post-content class
-            content_elem = soup.find('div', class_='post-content')
+        # Write results to database sequentially (SQLite doesn't handle concurrent writes well)
+        for post_id, content_html, content_text, title, success in results:
+            if success and (content_html or content_text):
+                update_post_content(post_id, content_html, content_text)
 
-        if not content_elem:
-            # Try the-content class
-            content_elem = soup.find('div', class_='the-content')
-
-        if content_elem:
-            # Remove comments section if present
-            for comments in content_elem.find_all(['div', 'section'], class_=lambda x: x and 'comment' in x.lower() if x else False):
-                comments.decompose()
-
-            # Remove sidebar elements if present
-            for sidebar in content_elem.find_all(['aside', 'div'], class_=lambda x: x and 'sidebar' in x.lower() if x else False):
-                sidebar.decompose()
-
-            content_html = str(content_elem)
-            content_text = content_elem.get_text(separator='\n', strip=True)
-        else:
-            print(f"  Warning: Could not find content element for post")
-
-        # Update the database with the scraped content
-        update_post_content(post_id, content_html, content_text)
-
-        # Delay between requests (1-2 seconds)
-        delay = random.uniform(1, 2)
-        time.sleep(delay)
-
-    print(f"Finished scraping {posts_to_scrape} posts")
+    print(f"Finished scraping {posts_to_scrape} posts ({failed_count} failed)")
