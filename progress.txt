@@ -87,3 +87,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - fetch_with_retry() can be reused for other network requests that need resilience
   - Pagination on listing pages sometimes picks up external links (e.g., Amazon) - the scraper gracefully handles this
 ---
+
+## 2026-01-19 - US-005
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented status command in db.py
+- Files modified:
+  - db.py: Implemented get_scrape_status() function
+- Features:
+  - Returns total posts in DB, posts with content scraped, last scrape timestamp
+  - Shows number of pages scraped, posts found, posts with content
+  - Displays content coverage percentage
+  - Formatted terminal output with aligned columns
+  - Returns dict for programmatic use as well as printing
+- **Learnings for future iterations:**
+  - Status function both prints AND returns data for flexibility
+  - Uses MAX(scraped_at) from posts table for last content scrape time
+  - Uses MAX(completed_at) from scrape_progress table for last listing scrape time
+---
