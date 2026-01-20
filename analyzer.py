@@ -906,3 +906,320 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
     # Categorize books by genre
     print("\n--- Genre Categorization ---")
     categorize_all_books()
+
+
+# ============================================================
+# Bradley-Terry Pairwise Ranking Functions
+# ============================================================
+
+def sample_pairs(mention_ids, n_pairs):
+    """Randomly sample pairs of book mentions for comparison.
+
+    Args:
+        mention_ids: List of mention IDs to sample from
+        n_pairs: Number of pairs to sample
+
+    Returns:
+        List of tuples: [(mention_a_id, mention_b_id), ...]
+    """
+    import random
+
+    if len(mention_ids) < 2:
+        return []
+
+    pairs = []
+    for _ in range(n_pairs):
+        # Sample two different mentions
+        a, b = random.sample(mention_ids, 2)
+        # Always order pair consistently (smaller ID first) to allow deduplication if needed
+        if a > b:
+            a, b = b, a
+        pairs.append((a, b))
+
+    return pairs
+
+
+def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b'):
+    """Ask LLM which review is more positive about its book.
+
+    Args:
+        mention_a: Tuple (mention_id, book_id, book_title, context_text, post_content)
+        mention_b: Tuple (mention_id, book_id, book_title, context_text, post_content)
+        model: Ollama model to use
+
+    Returns:
+        Tuple (mention_a_id, mention_b_id, winner_id)
+        winner_id is None for ties
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    mention_a_id, book_a_id, title_a, context_a, content_a = mention_a
+    mention_b_id, book_b_id, title_b, context_b, content_b = mention_b
+
+    # Use context if available, otherwise use truncated post content
+    text_a = context_a if context_a else (content_a[:1000] if content_a else "")
+    text_b = context_b if context_b else (content_b[:1000] if content_b else "")
+
+    # Truncate to reasonable length for comparison
+    text_a = text_a[:1500] if len(text_a) > 1500 else text_a
+    text_b = text_b[:1500] if len(text_b) > 1500 else text_b
+
+    prompt = f"""Compare these two book reviews from Tyler Cowen's blog. Which review expresses a MORE POSITIVE sentiment toward its book?
+
+REVIEW A - About "{title_a}":
+{text_a}
+
+REVIEW B - About "{title_b}":
+{text_b}
+
+Answer with ONLY one of these options:
+- "A" if Review A is more positive about its book
+- "B" if Review B is more positive about its book
+- "TIE" if they are equally positive or you cannot determine
+
+Your answer (A, B, or TIE):"""
+
+    try:
+        url = 'http://localhost:11434/api/generate'
+        data = json.dumps({
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'options': {
+                'temperature': 0.1,
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            response_text = result.get('response', '').strip().upper()
+
+            # Parse response
+            if 'TIE' in response_text or 'EQUAL' in response_text or 'CANNOT' in response_text:
+                return (mention_a_id, mention_b_id, None)
+            elif response_text.startswith('A') or 'REVIEW A' in response_text:
+                return (mention_a_id, mention_b_id, mention_a_id)
+            elif response_text.startswith('B') or 'REVIEW B' in response_text:
+                return (mention_a_id, mention_b_id, mention_b_id)
+            else:
+                # Can't parse, treat as tie
+                return (mention_a_id, mention_b_id, None)
+
+    except Exception as e:
+        # On error, return tie
+        return (mention_a_id, mention_b_id, None)
+
+
+def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0):
+    """Compare pairs in parallel using ThreadPoolExecutor.
+
+    Args:
+        pairs: List of tuples (mention_a_id, mention_b_id)
+        model: Ollama model to use
+        workers: Number of concurrent workers
+        rate_limit: Max requests per second across all workers
+
+    Returns:
+        List of tuples (mention_a_id, mention_b_id, winner_id)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    import time
+
+    from db import get_mention_for_comparison
+
+    # Rate limiter (similar to scraper.py)
+    class RateLimiter:
+        def __init__(self, rate):
+            self.min_interval = 1.0 / rate
+            self.last_time = 0
+            self.lock = threading.Lock()
+
+        def wait(self):
+            with self.lock:
+                now = time.time()
+                elapsed = now - self.last_time
+                if elapsed < self.min_interval:
+                    time.sleep(self.min_interval - elapsed)
+                self.last_time = time.time()
+
+    rate_limiter = RateLimiter(rate_limit)
+
+    def compare_single(pair):
+        """Worker function for comparing a single pair."""
+        rate_limiter.wait()
+
+        mention_a_id, mention_b_id = pair
+        mention_a = get_mention_for_comparison(mention_a_id)
+        mention_b = get_mention_for_comparison(mention_b_id)
+
+        if not mention_a or not mention_b:
+            return None
+
+        return compare_pair_with_llm(mention_a, mention_b, model)
+
+    results = []
+    total = len(pairs)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all tasks
+        future_to_pair = {executor.submit(compare_single, pair): pair for pair in pairs}
+
+        completed = 0
+        for future in as_completed(future_to_pair):
+            completed += 1
+            try:
+                result = future.result()
+                if result:
+                    results.append(result)
+            except Exception as e:
+                pass  # Skip failed comparisons
+
+            if completed % 100 == 0 or completed == total:
+                print(f"Compared {completed}/{total} pairs ({len(results)} valid)")
+
+    return results
+
+
+def fit_bradley_terry(comparisons, mention_ids):
+    """Fit Bradley-Terry model using choix library.
+
+    Args:
+        comparisons: List of tuples (mention_a_id, mention_b_id, winner_id)
+        mention_ids: List of all mention IDs (for mapping)
+
+    Returns:
+        Dict mapping mention_id to Bradley-Terry score
+    """
+    import numpy as np
+
+    # Create mapping from mention_id to index
+    id_to_idx = {mid: idx for idx, mid in enumerate(mention_ids)}
+    idx_to_id = {idx: mid for mid, idx in id_to_idx.items()}
+    n_items = len(mention_ids)
+
+    # Convert comparisons to choix format
+    # choix expects list of (winner_idx, loser_idx) tuples
+    valid_comparisons = []
+    ties = 0
+
+    for mention_a_id, mention_b_id, winner_id in comparisons:
+        if mention_a_id not in id_to_idx or mention_b_id not in id_to_idx:
+            continue
+
+        if winner_id is None:
+            # Tie - skip for now (could add tie handling later)
+            ties += 1
+            continue
+
+        winner_idx = id_to_idx[winner_id]
+        loser_idx = id_to_idx[mention_b_id if winner_id == mention_a_id else mention_a_id]
+        valid_comparisons.append((winner_idx, loser_idx))
+
+    if not valid_comparisons:
+        print("No valid comparisons for Bradley-Terry fitting.")
+        return {}
+
+    print(f"Fitting Bradley-Terry model with {len(valid_comparisons)} comparisons ({ties} ties excluded)...")
+
+    try:
+        import choix
+
+        # Fit the model using choix's pairwise comparison method
+        # Use opt_pairwise for maximum likelihood estimation
+        params = choix.opt_pairwise(n_items, valid_comparisons, alpha=0.01)
+
+        # Convert to dict
+        scores = {idx_to_id[idx]: float(params[idx]) for idx in range(n_items)}
+        return scores
+
+    except Exception as e:
+        print(f"Error fitting Bradley-Terry model: {e}")
+        return {}
+
+
+def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5):
+    """Run pairwise comparison ranking process.
+
+    Args:
+        n_comparisons: Number of pairwise comparisons to make
+        model: Ollama model to use
+        workers: Number of parallel workers
+    """
+    from db import (
+        get_mentions_for_bt,
+        get_all_comparisons,
+        get_comparison_count,
+        insert_comparisons_batch,
+        update_mention_bt_scores_batch,
+        update_book_bt_scores
+    )
+
+    # Check Ollama availability first
+    print("Checking Ollama availability...")
+    try:
+        check_ollama_available(model)
+        print(f"Ollama is available with model '{model}'.")
+    except ConnectionError:
+        print("\nAborting: Cannot proceed when Ollama is not available.")
+        return
+
+    # Get all mention IDs
+    mention_ids = get_mentions_for_bt()
+    print(f"Found {len(mention_ids)} book mentions for ranking.")
+
+    if len(mention_ids) < 2:
+        print("Need at least 2 book mentions for pairwise ranking.")
+        return
+
+    # Check existing comparisons
+    existing_count = get_comparison_count()
+    print(f"Existing comparisons: {existing_count}")
+
+    # Sample new pairs
+    print(f"Sampling {n_comparisons} pairs for comparison...")
+    pairs = sample_pairs(mention_ids, n_comparisons)
+
+    # Run comparisons in parallel
+    print(f"Running pairwise comparisons with {workers} workers...")
+    results = compare_pairs_parallel(pairs, model=model, workers=workers)
+
+    # Store results
+    if results:
+        print(f"Storing {len(results)} comparison results...")
+        insert_comparisons_batch(results)
+
+    # Get all comparisons (including previous runs)
+    all_comparisons = get_all_comparisons()
+    total_comparisons = len(all_comparisons)
+    print(f"Total comparisons available: {total_comparisons}")
+
+    # Fit Bradley-Terry model
+    print("\nFitting Bradley-Terry model...")
+    scores = fit_bradley_terry(all_comparisons, mention_ids)
+
+    if scores:
+        # Update mention scores
+        print(f"Updating Bradley-Terry scores for {len(scores)} mentions...")
+        score_tuples = list(scores.items())
+        # Batch update in chunks of 1000
+        for i in range(0, len(score_tuples), 1000):
+            chunk = score_tuples[i:i+1000]
+            update_mention_bt_scores_batch(chunk)
+
+        # Aggregate to book level
+        print("Aggregating scores to book level...")
+        update_book_bt_scores()
+
+        print("\nDone! Bradley-Terry ranking complete.")
+        print(f"Run 'python main.py rankings' to see the results.")
+    else:
+        print("No scores computed. Need more comparisons or valid data.")

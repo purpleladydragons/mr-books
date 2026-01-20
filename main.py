@@ -40,10 +40,30 @@ def cmd_analyze(args):
 
 def cmd_rankings(args):
     """Handle the rankings subcommand."""
-    from db import init_db, get_ranked_books
+    from db import init_db, get_ranked_books, get_ranked_books_by_bt, has_bt_scores
 
     init_db()
-    get_ranked_books(top=args.top, genre=args.genre)
+
+    # Use Bradley-Terry scores if available, otherwise fall back to sentiment scores
+    if has_bt_scores():
+        print("(Using Bradley-Terry pairwise rankings)\n")
+        get_ranked_books_by_bt(top=args.top, genre=args.genre)
+    else:
+        print("(Using sentiment scores - run 'python main.py rank' for better rankings)\n")
+        get_ranked_books(top=args.top, genre=args.genre)
+
+
+def cmd_rank(args):
+    """Handle the rank subcommand for Bradley-Terry pairwise ranking."""
+    from analyzer import run_pairwise_ranking
+    from db import init_db
+
+    init_db()
+    run_pairwise_ranking(
+        n_comparisons=args.comparisons,
+        model=args.model,
+        workers=args.workers
+    )
 
 
 def cmd_status(args):
@@ -132,6 +152,31 @@ def main():
         help='Check scraping progress'
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # rank subcommand for Bradley-Terry pairwise ranking
+    rank_parser = subparsers.add_parser(
+        'rank',
+        help='Run Bradley-Terry pairwise ranking using LLM comparisons'
+    )
+    rank_parser.add_argument(
+        '--comparisons',
+        type=int,
+        default=10000,
+        help='Number of pairwise comparisons to make (default: 10000)'
+    )
+    rank_parser.add_argument(
+        '--model',
+        type=str,
+        default='llama3.2:3b',
+        help='Ollama model to use (default: llama3.2:3b)'
+    )
+    rank_parser.add_argument(
+        '--workers',
+        type=int,
+        default=5,
+        help='Number of parallel workers for LLM calls (default: 5)'
+    )
+    rank_parser.set_defaults(func=cmd_rank)
 
     args = parser.parse_args()
 

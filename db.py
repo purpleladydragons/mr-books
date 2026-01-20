@@ -110,6 +110,32 @@ def init_db():
         )
     ''')
 
+    # Create comparisons table for Bradley-Terry pairwise ranking
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS comparisons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mention_a_id INTEGER NOT NULL,
+            mention_b_id INTEGER NOT NULL,
+            winner_id INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (mention_a_id) REFERENCES book_mentions(id),
+            FOREIGN KEY (mention_b_id) REFERENCES book_mentions(id),
+            FOREIGN KEY (winner_id) REFERENCES book_mentions(id)
+        )
+    ''')
+
+    # Add bt_score column to book_mentions if it doesn't exist
+    cursor.execute("PRAGMA table_info(book_mentions)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'bt_score' not in columns:
+        cursor.execute('ALTER TABLE book_mentions ADD COLUMN bt_score REAL')
+
+    # Add bt_score column to books if it doesn't exist
+    cursor.execute("PRAGMA table_info(books)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'bt_score' not in columns:
+        cursor.execute('ALTER TABLE books ADD COLUMN bt_score REAL')
+
     conn.commit()
     conn.close()
 
@@ -618,3 +644,295 @@ def update_book_genre(book_id, genre):
     ''', (genre, book_id))
     conn.commit()
     conn.close()
+
+
+# ============================================================
+# Bradley-Terry Pairwise Ranking Functions
+# ============================================================
+
+def get_all_book_mentions():
+    """Get all book mentions with their context for sampling.
+
+    Returns list of tuples: (mention_id, book_id, book_title, context_text, post_content)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bm.id, bm.book_id, b.title, bm.context_text, p.content_text
+        FROM book_mentions bm
+        JOIN books b ON bm.book_id = b.id
+        JOIN posts p ON bm.post_id = p.id
+        WHERE p.content_text IS NOT NULL
+        ORDER BY bm.id
+    ''')
+    mentions = cursor.fetchall()
+    conn.close()
+    return mentions
+
+
+def get_mentions_for_bt():
+    """Get all mention IDs for Bradley-Terry sampling.
+
+    Returns list of mention IDs.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bm.id
+        FROM book_mentions bm
+        JOIN posts p ON bm.post_id = p.id
+        WHERE p.content_text IS NOT NULL
+    ''')
+    mentions = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return mentions
+
+
+def get_mention_for_comparison(mention_id):
+    """Get a single mention's details for comparison.
+
+    Returns tuple: (mention_id, book_id, book_title, context_text, post_content)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bm.id, bm.book_id, b.title, bm.context_text, p.content_text
+        FROM book_mentions bm
+        JOIN books b ON bm.book_id = b.id
+        JOIN posts p ON bm.post_id = p.id
+        WHERE bm.id = ?
+    ''', (mention_id,))
+    mention = cursor.fetchone()
+    conn.close()
+    return mention
+
+
+def insert_comparison(mention_a_id, mention_b_id, winner_id):
+    """Insert a comparison result.
+
+    Args:
+        mention_a_id: First mention in comparison
+        mention_b_id: Second mention in comparison
+        winner_id: ID of winning mention, or None for tie
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO comparisons (mention_a_id, mention_b_id, winner_id)
+        VALUES (?, ?, ?)
+    ''', (mention_a_id, mention_b_id, winner_id))
+    conn.commit()
+    conn.close()
+
+
+def insert_comparisons_batch(comparisons):
+    """Insert multiple comparisons in a single transaction.
+
+    Args:
+        comparisons: List of tuples (mention_a_id, mention_b_id, winner_id)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.executemany('''
+        INSERT INTO comparisons (mention_a_id, mention_b_id, winner_id)
+        VALUES (?, ?, ?)
+    ''', comparisons)
+    conn.commit()
+    conn.close()
+
+
+def get_all_comparisons():
+    """Get all comparisons for Bradley-Terry fitting.
+
+    Returns list of tuples: (mention_a_id, mention_b_id, winner_id)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT mention_a_id, mention_b_id, winner_id
+        FROM comparisons
+    ''')
+    comparisons = cursor.fetchall()
+    conn.close()
+    return comparisons
+
+
+def get_comparison_count():
+    """Get total number of comparisons."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM comparisons')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def update_mention_bt_score(mention_id, bt_score):
+    """Update the Bradley-Terry score for a mention."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE book_mentions
+        SET bt_score = ?
+        WHERE id = ?
+    ''', (bt_score, mention_id))
+    conn.commit()
+    conn.close()
+
+
+def update_mention_bt_scores_batch(scores):
+    """Update Bradley-Terry scores for multiple mentions in a single transaction.
+
+    Args:
+        scores: List of tuples (mention_id, bt_score)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.executemany('''
+        UPDATE book_mentions
+        SET bt_score = ?
+        WHERE id = ?
+    ''', [(score, mid) for mid, score in scores])
+    conn.commit()
+    conn.close()
+
+
+def update_book_bt_scores():
+    """Update aggregated Bradley-Terry scores for all books.
+
+    Aggregates mention-level bt_scores to book-level using weighted average,
+    where weight is the number of comparisons each mention participated in.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # For each book, calculate weighted average of mention bt_scores
+    # Weight = number of comparisons that mention participated in
+    cursor.execute('''
+        UPDATE books
+        SET bt_score = (
+            SELECT SUM(bm.bt_score * weight) / SUM(weight)
+            FROM (
+                SELECT bm.id, bm.book_id, bm.bt_score,
+                       (SELECT COUNT(*) FROM comparisons c
+                        WHERE c.mention_a_id = bm.id OR c.mention_b_id = bm.id) as weight
+                FROM book_mentions bm
+                WHERE bm.bt_score IS NOT NULL
+            ) bm
+            WHERE bm.book_id = books.id AND bm.weight > 0
+        )
+        WHERE id IN (
+            SELECT DISTINCT book_id FROM book_mentions
+            WHERE bt_score IS NOT NULL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+
+def get_ranked_books_by_bt(top=None, genre=None):
+    """Get books ranked by Bradley-Terry score and print formatted results.
+
+    Args:
+        top: Limit results to top N books (default: all books)
+        genre: Filter by genre
+
+    Returns:
+        List of dicts with book info and post URLs
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Build query with optional genre filter
+    query = '''
+        SELECT b.id, b.title, b.author, b.bt_score, b.sentiment_score, b.genre
+        FROM books b
+        WHERE b.bt_score IS NOT NULL
+    '''
+    params = []
+
+    if genre:
+        query += ' AND b.genre = ?'
+        params.append(genre)
+
+    query += ' ORDER BY b.bt_score DESC'
+
+    if top:
+        query += ' LIMIT ?'
+        params.append(top)
+
+    cursor.execute(query, params)
+    books = cursor.fetchall()
+
+    if not books:
+        print("No books with Bradley-Terry scores found.")
+        print("Run 'python main.py rank --comparisons N' first to generate rankings.")
+        conn.close()
+        return []
+
+    # Get post URLs for each book
+    results = []
+    for book_id, title, author, bt_score, sentiment_score, book_genre in books:
+        cursor.execute('''
+            SELECT DISTINCT p.url
+            FROM book_mentions bm
+            JOIN posts p ON bm.post_id = p.id
+            WHERE bm.book_id = ?
+            ORDER BY p.date_published DESC
+        ''', (book_id,))
+        post_urls = [row[0] for row in cursor.fetchall()]
+
+        results.append({
+            'id': book_id,
+            'title': title,
+            'author': author,
+            'bt_score': bt_score,
+            'sentiment_score': sentiment_score,
+            'genre': book_genre,
+            'post_urls': post_urls
+        })
+
+    conn.close()
+
+    # Print formatted output
+    print("=" * 80)
+    print("Marginal Revolution Book Rankings (by Bradley-Terry Score)")
+    print("=" * 80)
+    print()
+
+    for rank, book in enumerate(results, 1):
+        bt = book['bt_score']
+        bt_str = f"{bt:.4f}" if bt is not None else "N/A"
+
+        # Print rank, title, and score
+        print(f"{rank:3}. {book['title']}")
+        print(f"     BT Score: {bt_str}")
+
+        # Print post URLs (limit to 3 to keep output readable)
+        urls = book['post_urls']
+        if urls:
+            print(f"     Mentioned in {len(urls)} post(s):")
+            for url in urls[:3]:
+                print(f"       - {url}")
+            if len(urls) > 3:
+                print(f"       ... and {len(urls) - 3} more")
+        print()
+
+    print("=" * 80)
+    print(f"Total: {len(results)} books")
+    if top:
+        print(f"(Showing top {top})")
+    print("=" * 80)
+
+    return results
+
+
+def has_bt_scores():
+    """Check if any books have Bradley-Terry scores."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM books WHERE bt_score IS NOT NULL')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
