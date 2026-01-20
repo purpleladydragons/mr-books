@@ -190,8 +190,49 @@ def extract_books_from_post(post_id, content_html, content_text):
 
 
 def analyze_sentiment(context_text):
-    """Analyze sentiment of text using VADER."""
-    pass
+    """Analyze sentiment of text using VADER.
+
+    Returns compound score (-1 to 1) or None if text is empty.
+    """
+    if not context_text or not context_text.strip():
+        return None
+
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    analyzer = SentimentIntensityAnalyzer()
+    scores = analyzer.polarity_scores(context_text)
+    return scores['compound']
+
+
+def analyze_book_mentions():
+    """Analyze sentiment for all unanalyzed book mentions and update book scores."""
+    from db import (
+        get_unanalyzed_mentions,
+        update_mention_sentiment,
+        update_book_sentiment
+    )
+
+    mentions = get_unanalyzed_mentions()
+    total = len(mentions)
+
+    if total == 0:
+        print("No unanalyzed book mentions found.")
+        return
+
+    print(f"Analyzing sentiment for {total} book mentions...")
+
+    for i, (mention_id, context_text) in enumerate(mentions, 1):
+        score = analyze_sentiment(context_text)
+        if score is not None:
+            update_mention_sentiment(mention_id, score)
+
+        if i % 100 == 0 or i == total:
+            print(f"Analyzed {i}/{total} mentions")
+
+    # Now update aggregated book sentiment scores
+    print("Updating aggregated book sentiment scores...")
+    update_book_sentiment()
+
+    print("Done!")
 
 
 def categorize_book(book_id, content_text):
@@ -220,4 +261,8 @@ def analyze_all_posts():
         if i % 100 == 0 or i == total:
             print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
 
-    print(f"\nDone! Extracted {total_books_found} book mentions from {total} posts.")
+    print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
+
+    # Now analyze sentiment for all book mentions
+    print("\n--- Sentiment Analysis ---")
+    analyze_book_mentions()

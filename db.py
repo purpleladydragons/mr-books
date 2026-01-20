@@ -351,3 +351,58 @@ def get_all_books():
     books = cursor.fetchall()
     conn.close()
     return books
+
+
+def get_unanalyzed_mentions():
+    """Get all book mentions that haven't been analyzed for sentiment yet."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, context_text FROM book_mentions
+        WHERE sentiment_score IS NULL
+        ORDER BY id
+    ''')
+    mentions = cursor.fetchall()
+    conn.close()
+    return mentions
+
+
+def update_mention_sentiment(mention_id, sentiment_score):
+    """Update the sentiment score for a book mention."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE book_mentions
+        SET sentiment_score = ?
+        WHERE id = ?
+    ''', (sentiment_score, mention_id))
+    conn.commit()
+    conn.close()
+
+
+def update_book_sentiment():
+    """Update the aggregated sentiment score for all books.
+
+    Calculates the average sentiment across all mentions for each book
+    and stores it in books.sentiment_score.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Update each book's sentiment_score with the average of its mentions
+    cursor.execute('''
+        UPDATE books
+        SET sentiment_score = (
+            SELECT AVG(bm.sentiment_score)
+            FROM book_mentions bm
+            WHERE bm.book_id = books.id
+            AND bm.sentiment_score IS NOT NULL
+        )
+        WHERE id IN (
+            SELECT DISTINCT book_id FROM book_mentions
+            WHERE sentiment_score IS NOT NULL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
