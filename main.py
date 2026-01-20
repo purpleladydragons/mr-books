@@ -30,7 +30,7 @@ def cmd_analyze(args):
     from db import init_db
 
     init_db()
-    analyze_all_posts(use_ollama=args.use_ollama, model=args.model)
+    analyze_all_posts(use_ollama=args.use_ollama, model=args.model, reextract=args.reextract)
 
 
 def cmd_rankings(args):
@@ -89,6 +89,11 @@ def main():
         type=str,
         default='llama3.2:3b',
         help='Ollama model to use (default: llama3.2:3b)'
+    )
+    analyze_parser.add_argument(
+        '--reextract',
+        action='store_true',
+        help='Force re-extraction of books from all posts (ignore cache)'
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 

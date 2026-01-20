@@ -64,9 +64,16 @@ def init_db():
             date_published TEXT,
             content_html TEXT,
             content_text TEXT,
-            scraped_at TEXT
+            scraped_at TEXT,
+            books_extracted_at TEXT
         )
     ''')
+
+    # Add books_extracted_at column if it doesn't exist (for existing databases)
+    cursor.execute("PRAGMA table_info(posts)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'books_extracted_at' not in columns:
+        cursor.execute('ALTER TABLE posts ADD COLUMN books_extracted_at TEXT')
 
     # Create books table
     cursor.execute('''
@@ -394,6 +401,48 @@ def get_posts_with_content():
     posts = cursor.fetchall()
     conn.close()
     return posts
+
+
+def get_posts_for_extraction(reextract=False):
+    """Get posts that need book extraction.
+
+    Args:
+        reextract: If True, return all posts with content (ignore books_extracted_at).
+                   If False, only return posts where books_extracted_at IS NULL.
+
+    Returns:
+        List of tuples: (id, url, title, content_html, content_text)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    if reextract:
+        cursor.execute('''
+            SELECT id, url, title, content_html, content_text FROM posts
+            WHERE content_text IS NOT NULL
+            ORDER BY id
+        ''')
+    else:
+        cursor.execute('''
+            SELECT id, url, title, content_html, content_text FROM posts
+            WHERE content_text IS NOT NULL AND books_extracted_at IS NULL
+            ORDER BY id
+        ''')
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+
+def mark_post_books_extracted(post_id):
+    """Mark a post as having had books extracted."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE posts
+        SET books_extracted_at = datetime('now')
+        WHERE id = ?
+    ''', (post_id,))
+    conn.commit()
+    conn.close()
 
 
 def insert_book(title, author=None):

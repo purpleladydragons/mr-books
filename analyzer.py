@@ -315,6 +315,40 @@ def extract_tyler_opinion(text, book_title):
     return None
 
 
+def check_ollama_available(model='llama3.2:3b'):
+    """Check if Ollama is available and the model is loaded.
+
+    Args:
+        model: The Ollama model to check for
+
+    Returns:
+        True if Ollama is available, raises ConnectionError otherwise
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    try:
+        url = 'http://localhost:11434/api/tags'
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            models = [m.get('name', '') for m in result.get('models', [])]
+            # Check if requested model is available (handle both 'model' and 'model:tag' formats)
+            model_base = model.split(':')[0]
+            available = any(m.startswith(model_base) for m in models)
+            if not available:
+                print(f"Warning: Model '{model}' not found in Ollama. Available models: {models}")
+                print(f"  - Pull the model with: ollama pull {model}")
+                raise ConnectionError(f"Model '{model}' not available in Ollama")
+            return True
+    except urllib.error.URLError as e:
+        print(f"Error: Could not connect to Ollama at localhost:11434. Is Ollama running?")
+        print(f"  - Start Ollama with: ollama serve")
+        print(f"  - Make sure model is available: ollama pull {model}")
+        raise ConnectionError(f"Ollama connection failed: {e}")
+
+
 def analyze_sentiment_ollama(context_text, book_title=None, model='llama3.2:3b'):
     """Analyze sentiment using Ollama LLM for better context understanding.
 
@@ -579,33 +613,54 @@ def categorize_all_books():
     print("Done!")
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b'):
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
         use_ollama: If True, use Ollama LLM for sentiment analysis instead of VADER
         model: Ollama model to use (default: llama3.2:3b)
+        reextract: If True, re-extract books from all posts (ignore cache)
     """
-    from db import get_posts_with_content
+    from db import get_posts_for_extraction, mark_post_books_extracted
 
-    posts = get_posts_with_content()
+    # Fail fast: Check Ollama availability BEFORE starting book extraction
+    if use_ollama:
+        print("Checking Ollama availability...")
+        try:
+            check_ollama_available(model)
+            print(f"Ollama is available with model '{model}'.")
+        except ConnectionError:
+            print("\nAborting: Cannot proceed with --use-ollama when Ollama is not available.")
+            return
+
+    posts = get_posts_for_extraction(reextract=reextract)
     total = len(posts)
 
     if total == 0:
-        print("No posts with content found. Run 'python main.py scrape' first.")
-        return
+        if reextract:
+            print("No posts with content found. Run 'python main.py scrape' first.")
+        else:
+            print("No new posts to process. All posts have already had books extracted.")
+            print("Use --reextract to force re-extraction from all posts.")
+        # Still run sentiment analysis and categorization for any unanalyzed mentions
+    else:
+        if reextract:
+            print(f"Re-extracting books from {total} posts (--reextract flag set)...")
+        else:
+            print(f"Extracting books from {total} new posts...")
 
-    print(f"Analyzing {total} posts for book mentions...")
+        total_books_found = 0
+        for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
+            books = extract_books_from_post(post_id, content_html, content_text)
+            total_books_found += len(books)
 
-    total_books_found = 0
-    for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
-        books = extract_books_from_post(post_id, content_html, content_text)
-        total_books_found += len(books)
+            # Mark post as processed
+            mark_post_books_extracted(post_id)
 
-        if i % 100 == 0 or i == total:
-            print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
+            if i % 100 == 0 or i == total:
+                print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
 
-    print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
+        print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
 
     # Now analyze sentiment for all book mentions
     print("\n--- Sentiment Analysis ---")
