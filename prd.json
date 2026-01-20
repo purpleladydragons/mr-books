@@ -240,6 +240,26 @@
       "priority": 14,
       "passes": true,
       "notes": "Added books_extracted_at timestamp column to posts table. Created get_posts_for_extraction() to skip processed posts and mark_post_books_extracted() to mark posts after extraction. Added --reextract flag to force re-extraction. Added check_ollama_available() function that runs BEFORE book extraction when --use-ollama is set, failing fast with clear error message if Ollama is unavailable."
+    },
+    {
+      "id": "US-015",
+      "title": "Use full post context for LLM-based book extraction and sentiment",
+      "description": "As a user, I want the LLM to analyze the full post content to better identify books and understand sentiment.",
+      "acceptanceCriteria": [
+        "Create new analyze_post_with_llm() function that takes full post content (not 300-char snippets)",
+        "Single LLM call per post that returns JSON array of: [{book_title, sentiment_score, reasoning}]",
+        "Prompt instructs LLM to find ALL books mentioned and rate Tyler's sentiment (1-10) for each",
+        "Prompt handles interview/transcript detection: only extract Tyler's opinions, not guests'",
+        "If post is an interview and Tyler doesn't comment on a book mentioned by guest, exclude it",
+        "Store full post content_text in book_mentions.context_text (or new column) for reference",
+        "Add --full-context flag to use this new approach (keep old approach as fallback)",
+        "Handle LLM JSON parsing errors gracefully - log warning and skip post rather than crashing",
+        "Deduplication still works: use find_or_create_book() for fuzzy matching across posts",
+        "Script runs without errors: python main.py analyze --use-ollama --full-context"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Implemented analyze_post_with_llm() that takes full post content, makes single LLM call returning JSON array of books with sentiment. Handles interview/transcript detection by checking for speaker tags. Uses find_or_create_book() for deduplication. Added --full-context flag to analyze command. JSON parsing errors are handled gracefully (logs warning, skips post). Stores LLM reasoning as context_text for reference."
     }
   ]
 }

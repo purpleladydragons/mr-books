@@ -349,6 +349,164 @@ def check_ollama_available(model='llama3.2:3b'):
         raise ConnectionError(f"Ollama connection failed: {e}")
 
 
+def analyze_post_with_llm(post_content, model='llama3.2:3b'):
+    """Analyze a full post with LLM to extract books and sentiment in one call.
+
+    Args:
+        post_content: The full post content_text (not a 300-char snippet)
+        model: The Ollama model to use (default: llama3.2:3b)
+
+    Returns:
+        List of dicts: [{'book_title': str, 'sentiment_score': float, 'reasoning': str}]
+        Returns empty list if:
+        - Post is empty
+        - LLM call fails
+        - JSON parsing fails
+        - In interview posts where Tyler doesn't express any opinions
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    if not post_content or not post_content.strip():
+        return []
+
+    # Truncate very long posts to avoid token limits (keep first 8000 chars)
+    analysis_text = post_content[:8000] if len(post_content) > 8000 else post_content
+
+    # Detect if this is an interview/transcript
+    is_interview = is_interview_or_transcript(post_content)
+
+    if is_interview:
+        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This appears to be an interview or transcript with multiple speakers.
+
+IMPORTANT: Only extract books that TYLER COWEN personally expresses an opinion about. Ignore book recommendations from guests or interviewees.
+
+Look for speaker tags like "TYLER:", "TYLER COWEN:", "TC:" to identify Tyler's statements.
+
+Text:
+{analysis_text}
+
+Find ALL books mentioned in the post that Tyler Cowen expresses an opinion about. For each book, rate Tyler's sentiment on a scale of 1-10:
+- 1-2: Very negative (strongly dislikes, criticizes, warns against)
+- 3-4: Negative (dislikes, has significant concerns)
+- 5-6: Neutral (mentions without strong opinion, mixed feelings)
+- 7-8: Positive (likes, recommends)
+- 9-10: Very positive (loves, highly recommends, enthusiastic)
+
+Respond with ONLY a JSON array. Each element should have:
+- "book_title": the book title (string)
+- "sentiment_score": your rating 1-10 (number)
+- "reasoning": brief explanation of Tyler's opinion (string)
+
+If no books are found or Tyler doesn't express opinions about any books, respond with: []
+
+Example response format:
+[{{"book_title": "The Great Gatsby", "sentiment_score": 8, "reasoning": "Tyler calls it a masterpiece"}}]"""
+    else:
+        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This is a regular blog post where Tyler is the author.
+
+Text:
+{analysis_text}
+
+Find ALL books mentioned in the post. For each book, rate Tyler Cowen's sentiment on a scale of 1-10:
+- 1-2: Very negative (strongly dislikes, criticizes, warns against)
+- 3-4: Negative (dislikes, has significant concerns)
+- 5-6: Neutral (mentions without strong opinion, mixed feelings)
+- 7-8: Positive (likes, recommends)
+- 9-10: Very positive (loves, highly recommends, enthusiastic)
+
+Respond with ONLY a JSON array. Each element should have:
+- "book_title": the book title (string)
+- "sentiment_score": your rating 1-10 (number)
+- "reasoning": brief explanation of Tyler's opinion (string)
+
+If no books are found, respond with: []
+
+Example response format:
+[{{"book_title": "The Great Gatsby", "sentiment_score": 8, "reasoning": "Tyler calls it a masterpiece"}}]"""
+
+    # Call Ollama API
+    try:
+        url = 'http://localhost:11434/api/generate'
+        data = json.dumps({
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'options': {
+                'temperature': 0.1,  # Low temperature for consistent output
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            response_text = result.get('response', '').strip()
+
+            # Try to parse JSON from the response
+            # Handle cases where LLM adds extra text around the JSON
+            try:
+                # First try direct parse
+                books = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Try to extract JSON array from the response
+                # Look for [...] pattern
+                match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                if match:
+                    try:
+                        books = json.loads(match.group())
+                    except json.JSONDecodeError:
+                        print(f"Warning: Could not parse JSON from LLM response")
+                        return []
+                else:
+                    # No JSON array found
+                    return []
+
+            # Validate and normalize the response
+            if not isinstance(books, list):
+                return []
+
+            normalized_books = []
+            for book in books:
+                if not isinstance(book, dict):
+                    continue
+                if 'book_title' not in book or 'sentiment_score' not in book:
+                    continue
+
+                title = book.get('book_title', '').strip()
+                if not title or len(title) < 3:
+                    continue
+
+                try:
+                    score = float(book.get('sentiment_score', 5.5))
+                    # Clamp to 1-10 range
+                    score = max(1, min(10, score))
+                    # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
+                    normalized_score = round((score - 5.5) / 4.5, 4)
+                except (ValueError, TypeError):
+                    normalized_score = 0.0
+
+                normalized_books.append({
+                    'book_title': title,
+                    'sentiment_score': normalized_score,
+                    'reasoning': book.get('reasoning', '')
+                })
+
+            return normalized_books
+
+    except urllib.error.URLError as e:
+        print(f"Error: Could not connect to Ollama at localhost:11434")
+        raise ConnectionError(f"Ollama connection failed: {e}")
+    except Exception as e:
+        print(f"Error calling Ollama API: {e}")
+        return []
+
+
 def analyze_sentiment_ollama(context_text, book_title=None, model='llama3.2:3b'):
     """Analyze sentiment using Ollama LLM for better context understanding.
 
@@ -613,15 +771,80 @@ def categorize_all_books():
     print("Done!")
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False):
+def analyze_posts_full_context(posts, model='llama3.2:3b'):
+    """Process posts using full-context LLM analysis.
+
+    This mode uses a single LLM call per post to extract all books and their
+    sentiment scores together, using the full post content for better understanding.
+
+    Args:
+        posts: List of tuples (id, url, title, content_html, content_text)
+        model: Ollama model to use
+    """
+    from db import find_or_create_book, insert_book_mention_with_sentiment, mark_post_books_extracted
+
+    total = len(posts)
+    total_books_found = 0
+    errors = 0
+
+    print(f"Analyzing {total} posts with full-context LLM mode...")
+
+    for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
+        try:
+            # Single LLM call returns all books with sentiment
+            books = analyze_post_with_llm(content_text, model)
+
+            for book_data in books:
+                book_title = book_data['book_title']
+                sentiment_score = book_data['sentiment_score']
+                reasoning = book_data.get('reasoning', '')
+
+                # Use fuzzy matching for deduplication
+                book_id = find_or_create_book(book_title)
+                if book_id is None:
+                    continue
+
+                # Store full post content as context (or reasoning if provided)
+                # Use reasoning as context since it's more concise and directly relevant
+                context = reasoning if reasoning else content_text[:500]
+
+                # Insert book mention with sentiment already set
+                insert_book_mention_with_sentiment(book_id, post_id, context, sentiment_score)
+                total_books_found += 1
+
+            # Mark post as processed
+            mark_post_books_extracted(post_id)
+
+        except ConnectionError:
+            print(f"\nOllama connection failed. Stopping analysis.")
+            return total_books_found, errors
+        except Exception as e:
+            print(f"\nWarning: Error processing post '{title}': {e}")
+            errors += 1
+            # Mark post as processed anyway to avoid re-processing on next run
+            mark_post_books_extracted(post_id)
+
+        if i % 10 == 0 or i == total:
+            print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
+
+    return total_books_found, errors
+
+
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
         use_ollama: If True, use Ollama LLM for sentiment analysis instead of VADER
         model: Ollama model to use (default: llama3.2:3b)
         reextract: If True, re-extract books from all posts (ignore cache)
+        full_context: If True, use full post content with single LLM call per post (requires --use-ollama)
     """
-    from db import get_posts_for_extraction, mark_post_books_extracted
+    from db import get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment
+
+    # full_context requires use_ollama
+    if full_context and not use_ollama:
+        print("Warning: --full-context requires --use-ollama. Enabling Ollama mode.")
+        use_ollama = True
 
     # Fail fast: Check Ollama availability BEFORE starting book extraction
     if use_ollama:
@@ -649,22 +872,36 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False):
         else:
             print(f"Extracting books from {total} new posts...")
 
-        total_books_found = 0
-        for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
-            books = extract_books_from_post(post_id, content_html, content_text)
-            total_books_found += len(books)
+        if full_context:
+            # Use the new full-context LLM approach
+            total_books_found, errors = analyze_posts_full_context(posts, model)
+            print(f"\nExtracted {total_books_found} book mentions from {total} posts using full-context LLM.")
+            if errors > 0:
+                print(f"Encountered {errors} errors during processing.")
 
-            # Mark post as processed
-            mark_post_books_extracted(post_id)
+            # Update aggregated book sentiment scores
+            print("\nUpdating aggregated book sentiment scores...")
+            update_book_sentiment()
+        else:
+            # Use the original extraction approach
+            total_books_found = 0
+            for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
+                books = extract_books_from_post(post_id, content_html, content_text)
+                total_books_found += len(books)
 
-            if i % 100 == 0 or i == total:
-                print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
+                # Mark post as processed
+                mark_post_books_extracted(post_id)
 
-        print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
+                if i % 100 == 0 or i == total:
+                    print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
 
-    # Now analyze sentiment for all book mentions
-    print("\n--- Sentiment Analysis ---")
-    analyze_book_mentions(use_ollama=use_ollama, model=model)
+            print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
+
+    # For full_context mode, sentiment is already done. For traditional mode, analyze mentions.
+    if not full_context:
+        # Now analyze sentiment for all book mentions
+        print("\n--- Sentiment Analysis ---")
+        analyze_book_mentions(use_ollama=use_ollama, model=model)
 
     # Categorize books by genre
     print("\n--- Genre Categorization ---")

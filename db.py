@@ -483,6 +483,20 @@ def insert_book_mention(book_id, post_id, context_text):
         conn.close()
 
 
+def insert_book_mention_with_sentiment(book_id, post_id, context_text, sentiment_score):
+    """Insert a book mention with sentiment score already set, ignoring duplicates."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR IGNORE INTO book_mentions (book_id, post_id, context_text, sentiment_score)
+            VALUES (?, ?, ?, ?)
+        ''', (book_id, post_id, context_text, sentiment_score))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_all_books():
     """Get all books from the database."""
     conn = get_connection()

@@ -30,7 +30,12 @@ def cmd_analyze(args):
     from db import init_db
 
     init_db()
-    analyze_all_posts(use_ollama=args.use_ollama, model=args.model, reextract=args.reextract)
+    analyze_all_posts(
+        use_ollama=args.use_ollama,
+        model=args.model,
+        reextract=args.reextract,
+        full_context=args.full_context
+    )
 
 
 def cmd_rankings(args):
@@ -94,6 +99,11 @@ def main():
         '--reextract',
         action='store_true',
         help='Force re-extraction of books from all posts (ignore cache)'
+    )
+    analyze_parser.add_argument(
+        '--full-context',
+        action='store_true',
+        help='Use full post content for LLM analysis (single LLM call per post with JSON output)'
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 
