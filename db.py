@@ -207,3 +207,65 @@ def get_ranked_books(top=None, genre=None):
 def find_or_create_book(title, author=None):
     """Find an existing book or create a new one with deduplication."""
     pass
+
+
+def get_posts_with_content():
+    """Get all posts that have content scraped."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, url, title, content_html, content_text FROM posts
+        WHERE content_text IS NOT NULL
+        ORDER BY id
+    ''')
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+
+def insert_book(title, author=None):
+    """Insert a new book and return its ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO books (title, author)
+        VALUES (?, ?)
+    ''', (title, author))
+    book_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return book_id
+
+
+def get_book_by_title(title):
+    """Get a book by exact title match."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, title, author FROM books WHERE title = ?', (title,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+
+def insert_book_mention(book_id, post_id, context_text):
+    """Insert a book mention, ignoring duplicates."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR IGNORE INTO book_mentions (book_id, post_id, context_text)
+            VALUES (?, ?, ?)
+        ''', (book_id, post_id, context_text))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_all_books():
+    """Get all books from the database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, title, author FROM books ORDER BY id')
+    books = cursor.fetchall()
+    conn.close()
+    return books
