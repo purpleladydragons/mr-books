@@ -168,6 +168,23 @@
       "priority": 10,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Fix pagination bug for pages 9+",
+      "description": "As a user, I want pagination to work correctly beyond page 8 so all posts are scraped.",
+      "acceptanceCriteria": [
+        "Fix scrape_category_listing() to correctly identify the 'next page' link",
+        "Do not follow Amazon or other external links as pagination URLs",
+        "Handle ellipsis pagination correctly - when on page 9, page 10 may be hidden behind '...' but the 'next' or '>' link should still work",
+        "Validate that pagination URLs match the pattern: marginalrevolution.com/marginalrevolution/category/books/page/N",
+        "Skip invalid URLs like '#' or external domains",
+        "Successfully scrapes pages 9, 10, and beyond without errors",
+        "Script runs without errors: python main.py scrape --listing-only"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Fixed by adding is_valid_pagination_url() validation function that filters out external domains, anchor links, and ensures URLs match the expected pagination pattern."
     }
   ]
 }

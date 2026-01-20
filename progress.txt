@@ -18,6 +18,7 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Deduplication: Uses rapidfuzz library with token_sort_ratio for 85% similarity threshold
 - Sentiment: Use VADER via `vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer`; compound score is -1 to 1
 - Sentiment: Scores are stored at both mention level (book_mentions.sentiment_score) and book level (books.sentiment_score)
+- Pagination: Use is_valid_pagination_url() to validate next page links; filters out external domains and invalid URLs
 ---
 
 ## 2026-01-19 - US-001
@@ -207,4 +208,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Genre keywords should be ordered by specificity for better matching
   - Combining book mention context_text with full post content provides richer data for categorization
   - A threshold (min 2 keyword matches) helps avoid false categorizations
+---
+
+## 2026-01-19 - US-011
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Fixed pagination bug for pages 9+ in scraper.py
+- Files modified:
+  - scraper.py: Added is_valid_pagination_url() function and refactored pagination logic
+- Features:
+  - is_valid_pagination_url(): validates URLs match the expected Books category pattern
+  - Filters out external domains (Amazon, etc.), anchor links (#), and javascript: links
+  - Validates that URLs point to the correct page number
+  - Multiple strategies for finding next page with URL construction as fallback
+  - Successfully scrapes pages 9, 10, and beyond (tested to page 49+)
+- **Learnings for future iterations:**
+  - Pagination in WordPress sites can include unrelated links (Amazon affiliate, etc.)
+  - Always validate that pagination URLs match the expected domain/pattern before following
+  - When pagination element hides some page numbers (ellipsis), the link may still work by constructing URL directly
+  - Adding VALID_PAGINATION_PATTERN constant helps centralize the URL validation logic
 ---
