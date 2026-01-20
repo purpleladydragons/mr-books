@@ -185,6 +185,23 @@
       "priority": 11,
       "passes": true,
       "notes": "Fixed by adding is_valid_pagination_url() validation function that filters out external domains, anchor links, and ensures URLs match the expected pagination pattern."
+    },
+    {
+      "id": "US-012",
+      "title": "Parallelize post content scraping",
+      "description": "As a user, I want scraping to be faster by fetching multiple posts concurrently.",
+      "acceptanceCriteria": [
+        "Modify scrape_post_content() to fetch up to 5 posts concurrently using concurrent.futures.ThreadPoolExecutor",
+        "Add --workers N flag to control concurrency (default 5)",
+        "Batch database writes to avoid SQLite concurrent write issues - collect results from workers, write sequentially in main thread",
+        "Maintain rate limiting: total requests across all workers should not exceed ~5 per second",
+        "Preserve retry logic and error handling for individual post failures",
+        "Progress logging still works correctly (e.g., 'Scraped 150/1200 posts')",
+        "Script runs without errors: python main.py scrape --workers 5"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Implemented using ThreadPoolExecutor with RateLimiter class for thread-safe rate limiting. Posts are fetched in parallel and results are collected, then written to DB sequentially in batches of 50 to avoid SQLite concurrency issues."
     }
   ]
 }
