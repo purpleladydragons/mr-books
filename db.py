@@ -4,8 +4,45 @@ Database operations for Marginal Revolution Book Reviews.
 
 import sqlite3
 import os
+import re
+from rapidfuzz import fuzz
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mr_books.db')
+
+# Articles to strip for title normalization
+ARTICLES = {'the', 'a', 'an'}
+
+# Similarity threshold for considering two titles the same book
+SIMILARITY_THRESHOLD = 85
+
+
+def normalize_title(title):
+    """Normalize a book title for comparison.
+
+    - Converts to lowercase
+    - Strips leading articles (the, a, an)
+    - Removes punctuation
+    - Collapses whitespace
+    """
+    if not title:
+        return ""
+
+    # Lowercase
+    normalized = title.lower().strip()
+
+    # Remove leading articles
+    words = normalized.split()
+    if words and words[0] in ARTICLES:
+        words = words[1:]
+    normalized = ' '.join(words)
+
+    # Remove punctuation (keep alphanumeric and spaces)
+    normalized = re.sub(r'[^\w\s]', '', normalized)
+
+    # Collapse whitespace
+    normalized = ' '.join(normalized.split())
+
+    return normalized
 
 
 def get_connection():
@@ -205,8 +242,53 @@ def get_ranked_books(top=None, genre=None):
 
 
 def find_or_create_book(title, author=None):
-    """Find an existing book or create a new one with deduplication."""
-    pass
+    """Find an existing book or create a new one with deduplication.
+
+    Uses fuzzy string matching to detect similar titles with >85% similarity.
+    Normalizes titles (lowercase, strip articles) before comparison.
+    If a match is found, returns the existing book's ID.
+    Otherwise, creates a new book and returns its ID.
+    """
+    if not title:
+        return None
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Normalize the input title for comparison
+    normalized_input = normalize_title(title)
+
+    # Get all existing books
+    cursor.execute('SELECT id, title FROM books')
+    existing_books = cursor.fetchall()
+
+    best_match_id = None
+    best_match_score = 0
+
+    for book_id, existing_title in existing_books:
+        normalized_existing = normalize_title(existing_title)
+
+        # Calculate similarity using token sort ratio (handles word order differences)
+        score = fuzz.token_sort_ratio(normalized_input, normalized_existing)
+
+        if score > best_match_score and score >= SIMILARITY_THRESHOLD:
+            best_match_score = score
+            best_match_id = book_id
+
+    if best_match_id is not None:
+        # Found a matching book
+        conn.close()
+        return best_match_id
+
+    # No match found, create a new book
+    cursor.execute('''
+        INSERT INTO books (title, author)
+        VALUES (?, ?)
+    ''', (title, author))
+    book_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return book_id
 
 
 def get_posts_with_content():

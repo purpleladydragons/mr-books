@@ -148,7 +148,7 @@ def clean_title(title):
 
 def extract_books_from_post(post_id, content_html, content_text):
     """Extract book titles from a post using NLP and pattern matching."""
-    from db import get_book_by_title, insert_book, insert_book_mention
+    from db import find_or_create_book, insert_book_mention
 
     if not content_text and not content_html:
         return []
@@ -174,12 +174,10 @@ def extract_books_from_post(post_id, content_html, content_text):
         if not cleaned:
             continue
 
-        # Check if book already exists
-        existing = get_book_by_title(cleaned)
-        if existing:
-            book_id = existing[0]
-        else:
-            book_id = insert_book(cleaned)
+        # Find existing book (with fuzzy matching) or create new one
+        book_id = find_or_create_book(cleaned)
+        if book_id is None:
+            continue
 
         # Get context for this mention
         context = get_context_for_title(cleaned, content_text)
