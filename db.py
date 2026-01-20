@@ -70,6 +70,40 @@ def init_db():
     conn.close()
 
 
+def insert_post(url, title, date_published):
+    """Insert a new post or ignore if URL already exists."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO posts (url, title, date_published)
+        VALUES (?, ?, ?)
+    ''', (url, title, date_published))
+    conn.commit()
+    conn.close()
+
+
+def record_page_scraped(page_number):
+    """Record that a page has been scraped."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO scrape_progress (page_number)
+        VALUES (?)
+    ''', (page_number,))
+    conn.commit()
+    conn.close()
+
+
+def get_last_scraped_page():
+    """Get the last scraped page number, or 0 if none."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT MAX(page_number) FROM scrape_progress')
+    result = cursor.fetchone()[0]
+    conn.close()
+    return result if result is not None else 0
+
+
 def get_scrape_status():
     """Get the current scrape status and print it to terminal."""
     pass
