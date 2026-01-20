@@ -22,6 +22,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Interview Detection: is_interview_or_transcript() detects speaker tags; extract_tyler_opinion() filters to Tyler's sections only
 - Pagination: Use is_valid_pagination_url() to validate next page links; filters out external domains and invalid URLs
 - Parallel Scraping: Use ThreadPoolExecutor + RateLimiter class for concurrent fetching; collect results, write to DB sequentially
+- Caching: posts.books_extracted_at tracks extraction completion; use get_posts_for_extraction() for incremental processing
+- Fail-fast: Use check_ollama_available() at start when --use-ollama to avoid wasting time if Ollama unavailable
+- Schema Migration: Use PRAGMA table_info() + ALTER TABLE ADD COLUMN for backwards-compatible migrations
 ---
 
 ## 2026-01-19 - US-001
@@ -273,4 +276,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Ollama API at localhost:11434/api/generate accepts JSON with model, prompt, stream, options
   - Low temperature (0.1) helps get consistent numeric ratings from LLM
   - Use urllib instead of requests to avoid adding new dependency
+---
+
+## 2026-01-19 - US-014
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented book extraction caching in db.py and analyzer.py
+- Files modified:
+  - db.py: Added books_extracted_at column, get_posts_for_extraction(), mark_post_books_extracted()
+  - analyzer.py: Added check_ollama_available(), modified analyze_all_posts() to use caching
+  - main.py: Added --reextract flag to analyze command
+- Features:
+  - books_extracted_at: Nullable timestamp column marking when post was processed
+  - get_posts_for_extraction(reextract=False): Returns posts needing extraction (or all with reextract=True)
+  - mark_post_books_extracted(): Sets books_extracted_at to current time
+  - check_ollama_available(): Validates Ollama connection and model availability BEFORE starting work
+  - --reextract flag: Forces re-extraction from all posts, ignoring cache
+  - Skips book extraction for already-processed posts, still runs sentiment analysis on unanalyzed mentions
+- **Learnings for future iterations:**
+  - Use PRAGMA table_info() to check if column exists before ALTER TABLE ADD COLUMN
+  - Fail-fast pattern: Check external dependencies (Ollama) at start, not after expensive work
+  - Ollama /api/tags endpoint lists available models; check before attempting generation
+  - When caching, provide both "skip if cached" and "force refresh" options (--reextract)
+  - Even when skipping extraction, continue to sentiment analysis/categorization phases
 ---

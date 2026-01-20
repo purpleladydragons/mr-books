@@ -222,6 +222,24 @@
       "priority": 13,
       "passes": true,
       "notes": "Implemented analyze_sentiment_ollama() with interview/transcript detection using is_interview_or_transcript() and extract_tyler_opinion() functions. Handles speaker tags like 'TYLER:', 'TYLER COWEN:', 'TC:', 'GUEST:', etc. Normalizes LLM 1-10 scores to -1 to 1 scale. Shows helpful error messages when Ollama is not available."
+    },
+    {
+      "id": "US-014",
+      "title": "Cache book extraction - only process each post once",
+      "description": "As a user, I want book extraction to be cached so I don't re-process posts every time I run analyze.",
+      "acceptanceCriteria": [
+        "Add 'books_extracted_at' timestamp column to posts table (nullable)",
+        "Modify extract_books_from_post() to mark the post as processed after extraction",
+        "Modify analyze_all_posts() to skip posts where books_extracted_at IS NOT NULL",
+        "Book extraction only runs on new/unprocessed posts, not all posts every time",
+        "Add --reextract flag to force re-extraction of books from all posts if needed",
+        "Sentiment analysis step remains separate and still only processes unanalyzed mentions",
+        "Check for Ollama availability BEFORE running book extraction when --use-ollama is set, fail fast with clear error",
+        "Script runs without errors: python main.py analyze --use-ollama"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Added books_extracted_at timestamp column to posts table. Created get_posts_for_extraction() to skip processed posts and mark_post_books_extracted() to mark posts after extraction. Added --reextract flag to force re-extraction. Added check_ollama_available() function that runs BEFORE book extraction when --use-ollama is set, failing fast with clear error message if Ollama is unavailable."
     }
   ]
 }
