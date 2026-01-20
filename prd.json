@@ -16,7 +16,7 @@
         "Script runs without errors: python main.py --help"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -1,3 +1,23 @@
 # Ralph Progress Log
 Started: Mon Jan 19 16:47:53 PST 2026
+
+## Codebase Patterns
+- CLI uses argparse with subparsers for subcommands (scrape, analyze, rankings, status)
+- Each command has a cmd_<name> function handler in main.py that imports and calls module functions
+- Module functions are imported lazily inside command handlers to avoid import errors when modules are incomplete
+---
+
+## 2026-01-19 - US-001
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented project structure and requirements.txt
+- Files created:
+  - requirements.txt: dependencies (requests, beautifulsoup4, vaderSentiment, spacy, lxml)
+  - main.py: CLI with argparse subcommands (scrape, analyze, rankings, status)
+  - db.py: stub module for database operations
+  - scraper.py: stub module for web scraping
+  - analyzer.py: stub module for NLP/sentiment analysis
+- **Learnings for future iterations:**
+  - The CLI uses lazy imports in command handlers to avoid import errors from incomplete modules
+  - `python main.py --help` runs successfully, confirming the basic structure works
+  - Each subcommand has its own set_defaults(func=cmd_X) for routing
 ---
