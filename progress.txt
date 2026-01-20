@@ -19,6 +19,7 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Sentiment: Use VADER via `vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer`; compound score is -1 to 1
 - Sentiment: Scores are stored at both mention level (book_mentions.sentiment_score) and book level (books.sentiment_score)
 - Pagination: Use is_valid_pagination_url() to validate next page links; filters out external domains and invalid URLs
+- Parallel Scraping: Use ThreadPoolExecutor + RateLimiter class for concurrent fetching; collect results, write to DB sequentially
 ---
 
 ## 2026-01-19 - US-001
@@ -226,4 +227,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Always validate that pagination URLs match the expected domain/pattern before following
   - When pagination element hides some page numbers (ellipsis), the link may still work by constructing URL directly
   - Adding VALID_PAGINATION_PATTERN constant helps centralize the URL validation logic
+---
+
+## 2026-01-19 - US-012
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented parallel post content scraping in scraper.py
+- Files modified:
+  - scraper.py: Added RateLimiter class, _fetch_single_post() helper, modified scrape_post_content()
+  - main.py: Added --workers flag to scrape command
+- Features:
+  - RateLimiter class: thread-safe rate limiting across workers (~5 requests/second)
+  - ThreadPoolExecutor for parallel fetching with configurable worker count
+  - Batch processing in groups of 50 posts to manage memory
+  - Sequential DB writes after batch completion (avoids SQLite concurrent write issues)
+  - Progress logging shows current/total with success/failure status
+  - Preserved retry logic via fetch_with_retry() in worker threads
+- **Learnings for future iterations:**
+  - SQLite doesn't handle concurrent writes well - always collect results and write sequentially
+  - RateLimiter with a lock ensures thread-safe timing across all workers
+  - Processing in batches (50) helps manage memory while still achieving parallelism
+  - The `as_completed()` function is key for processing results as they arrive
 ---
