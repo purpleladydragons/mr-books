@@ -28,6 +28,10 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Full-context LLM: Use analyze_post_with_llm() with --full-context flag for single LLM call per post extracting books + sentiment
 - Full-context LLM: Returns JSON array; use regex to extract [...] pattern when LLM adds extra text
 - Full-context LLM: Use insert_book_mention_with_sentiment() to store sentiment directly with mention
+- Bradley-Terry: Use `python main.py rank --comparisons N` for pairwise ranking; uses choix library
+- Bradley-Terry: comparisons table stores pairwise results; bt_score columns on book_mentions and books
+- Bradley-Terry: Use sample_pairs() for random sampling; compare_pairs_parallel() for parallel LLM calls
+- Bradley-Terry: rankings command auto-detects and uses bt_score when available via has_bt_scores()
 ---
 
 ## 2026-01-19 - US-001
@@ -329,4 +333,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Score normalization: (score - 5.5) / 4.5 converts 1-10 to -1 to 1
   - When inserting mentions with sentiment, use insert_book_mention_with_sentiment() to set score directly
   - Full-context mode skips separate sentiment analysis phase since LLM already scored books
+---
+
+## 2026-01-20 - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented Bradley-Terry pairwise ranking for book sentiment
+- Files modified:
+  - requirements.txt: Added choix library for Bradley-Terry model fitting
+  - db.py: Added comparisons table, bt_score columns, and db functions for BT operations
+  - analyzer.py: Added sample_pairs(), compare_pair_with_llm(), compare_pairs_parallel(), fit_bradley_terry(), run_pairwise_ranking()
+  - main.py: Added 'rank' command with --comparisons, --model, --workers flags; updated rankings to use bt_score when available
+- Features:
+  - comparisons table stores pairwise comparison results (mention_a_id, mention_b_id, winner_id)
+  - bt_score columns on book_mentions and books tables for Bradley-Terry strength scores
+  - sample_pairs(): random sampling of mention pairs for comparison
+  - compare_pair_with_llm(): asks LLM "which review is more positive?" returning A, B, or TIE
+  - compare_pairs_parallel(): ThreadPoolExecutor with RateLimiter for parallel LLM calls
+  - fit_bradley_terry(): uses choix.opt_pairwise() for maximum likelihood estimation
+  - Aggregates mention-level BT scores to book-level using weighted average (weight = comparison count)
+  - Rankings command auto-detects and uses bt_score when available
+  - Incremental: can stop and resume, adding more comparisons improves rankings
+- **Learnings for future iterations:**
+  - choix library expects (winner_idx, loser_idx) tuples; convert from (a, b, winner) format
+  - Use opt_pairwise() with alpha regularization to handle sparse comparison graphs
+  - Ties are excluded from BT fitting (could add tie handling with proper Bradley-Terry extensions)
+  - Rate limiting across workers: RateLimiter with lock ensures thread-safe timing
+  - Batch db operations (insert_comparisons_batch, update_mention_bt_scores_batch) for efficiency
+  - LLM comparison prompt should be explicit about what to compare (review positivity, not book quality)
 ---

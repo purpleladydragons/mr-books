@@ -260,6 +260,31 @@
       "priority": 15,
       "passes": true,
       "notes": "Implemented analyze_post_with_llm() that takes full post content, makes single LLM call returning JSON array of books with sentiment. Handles interview/transcript detection by checking for speaker tags. Uses find_or_create_book() for deduplication. Added --full-context flag to analyze command. JSON parsing errors are handled gracefully (logs warning, skips post). Stores LLM reasoning as context_text for reference."
+    },
+    {
+      "id": "US-016",
+      "title": "Implement Bradley-Terry pairwise ranking for book sentiment",
+      "description": "As a user, I want more accurate sentiment rankings using pairwise comparisons instead of absolute scores.",
+      "acceptanceCriteria": [
+        "Create 'comparisons' table: id, mention_a_id, mention_b_id, winner_id (nullable for ties), created_at",
+        "Add 'choix' to requirements.txt for Bradley-Terry model fitting",
+        "Create sample_pairs() function that randomly samples pairs of book mentions for comparison",
+        "Create compare_pair_with_llm() function that asks Ollama: 'Which review sounds more positive about its book? A or B?' - returns winner",
+        "Prompt includes both full post contexts (or relevant excerpts) so LLM can compare fairly",
+        "Handle ties: if LLM says equal/can't decide, store winner_id as NULL",
+        "Create fit_bradley_terry() function using choix library to compute scores from comparisons",
+        "Add 'bt_score' column to book_mentions table to store Bradley-Terry strength scores",
+        "Aggregate mention-level BT scores to book-level using weighted average (weight = comparison count per mention)",
+        "Add 'bt_score' column to books table for aggregated score",
+        "Add new CLI command: python main.py rank --comparisons 50000 --workers 5",
+        "Parallelize LLM calls using ThreadPoolExecutor (like scraping) with configurable workers",
+        "Store comparisons incrementally - can stop and resume, adding more comparisons improves rankings",
+        "Update 'python main.py rankings' to use bt_score instead of sentiment_score when available",
+        "Script runs without errors: python main.py rank --comparisons 10000 --workers 5"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Implemented comparisons table for storing pairwise results. Created sample_pairs() for random sampling, compare_pair_with_llm() for LLM-based comparison, compare_pairs_parallel() for parallel execution with rate limiting, and fit_bradley_terry() using choix library. Added 'python main.py rank --comparisons N --workers N' command. Rankings command auto-detects and uses bt_score when available. Comparisons stored incrementally - can stop and resume to improve rankings over time."
     }
   ]
 }
