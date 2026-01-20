@@ -11,6 +11,7 @@ from db import (insert_post, record_page_scraped, get_last_scraped_page,
 
 
 BASE_URL = "https://marginalrevolution.com/marginalrevolution/category/books"
+VALID_PAGINATION_PATTERN = "marginalrevolution.com/marginalrevolution/category/books"
 
 # Create a cloudscraper session to handle Cloudflare protection
 scraper = cloudscraper.create_scraper(
@@ -20,6 +21,40 @@ scraper = cloudscraper.create_scraper(
         'desktop': True
     }
 )
+
+
+def is_valid_pagination_url(url, expected_page=None):
+    """Validate that a URL is a valid pagination link for the Books category.
+
+    Args:
+        url: The URL to validate
+        expected_page: If provided, checks that the URL points to this page number
+
+    Returns:
+        True if the URL is a valid pagination link, False otherwise
+    """
+    if not url or not isinstance(url, str):
+        return False
+
+    # Skip anchor-only links
+    if url == '#' or url.startswith('#'):
+        return False
+
+    # Skip javascript: links
+    if url.startswith('javascript:'):
+        return False
+
+    # URL must contain the valid pattern for Books category
+    if VALID_PAGINATION_PATTERN not in url:
+        return False
+
+    # If checking for a specific page, validate it
+    if expected_page is not None and expected_page > 1:
+        expected_pattern = f"/page/{expected_page}"
+        if expected_pattern not in url:
+            return False
+
+    return True
 
 
 def scrape_category_listing():
@@ -87,34 +122,62 @@ def scrape_category_listing():
 
         # Find the next page link
         next_link = None
+        next_page = page_number + 1
 
-        # Look for pagination links
+        # Strategy 1: Look for pagination container and find 'next' link
         pagination = soup.find('nav', class_='navigation') or soup.find('div', class_='pagination')
         if pagination:
-            next_a = pagination.find('a', class_='next') or pagination.find('a', text=lambda t: t and 'next' in t.lower() if t else False)
+            next_a = pagination.find('a', class_='next')
             if next_a:
-                next_link = next_a.get('href')
+                href = next_a.get('href')
+                if is_valid_pagination_url(href, next_page):
+                    next_link = href
 
-        # Alternative: look for "older posts" link
-        if not next_link:
-            older_link = soup.find('a', text=lambda t: t and ('older' in t.lower() or 'next' in t.lower()) if t else False)
-            if older_link:
-                next_link = older_link.get('href')
+            # Try text-based search within pagination
+            if not next_link:
+                for a in pagination.find_all('a'):
+                    text = a.get_text(strip=True).lower()
+                    if 'next' in text or '»' in text or '›' in text:
+                        href = a.get('href')
+                        if is_valid_pagination_url(href, next_page):
+                            next_link = href
+                            break
 
-        # Alternative: look for nav-links
+        # Strategy 2: Look for nav-links container (common WordPress pattern)
         if not next_link:
             nav_links = soup.find('div', class_='nav-links')
             if nav_links:
                 next_a = nav_links.find('a', class_='next')
                 if next_a:
-                    next_link = next_a.get('href')
+                    href = next_a.get('href')
+                    if is_valid_pagination_url(href, next_page):
+                        next_link = href
 
-        # Alternative: look for link to specific next page
+        # Strategy 3: Look for "older posts" or navigation links
         if not next_link:
-            next_page_url = f"/page/{page_number + 1}"
-            next_a = soup.find('a', href=lambda h: h and next_page_url in h if h else False)
-            if next_a:
-                next_link = next_a.get('href')
+            for a in soup.find_all('a'):
+                text = a.get_text(strip=True).lower()
+                if 'older' in text or 'next page' in text:
+                    href = a.get('href')
+                    if is_valid_pagination_url(href, next_page):
+                        next_link = href
+                        break
+
+        # Strategy 4: Directly look for link to specific next page number
+        if not next_link:
+            next_page_pattern = f"/page/{next_page}"
+            for a in soup.find_all('a', href=True):
+                href = a.get('href')
+                if href and next_page_pattern in href and is_valid_pagination_url(href, next_page):
+                    next_link = href
+                    break
+
+        # Strategy 5: Construct URL directly if we know the pattern works
+        if not next_link and page_number < 500:  # Safety limit
+            constructed_url = f"{BASE_URL}/page/{next_page}/"
+            # We'll try this URL; if it fails the next iteration will stop
+            next_link = constructed_url
+            print(f"  No pagination link found, trying constructed URL: {next_link}")
 
         if next_link:
             current_url = next_link
