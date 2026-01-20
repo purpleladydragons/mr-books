@@ -11,6 +11,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Scraper: Article entries are in `<article>` tags, title links have `rel='bookmark'` attribute
 - Scraper: Pagination can be found via link text "Next" or by looking for `/page/N` in href
 - Scraper: Post content is in `div.entry-content` class; use fetch_with_retry() for resilient requests
+- Analyzer: Use lazy imports inside functions to avoid circular imports between db.py and analyzer.py
+- Analyzer: spaCy model 'en_core_web_sm' is required; code auto-downloads if missing
 ---
 
 ## 2026-01-19 - US-001
@@ -103,4 +105,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Status function both prints AND returns data for flexibility
   - Uses MAX(scraped_at) from posts table for last content scrape time
   - Uses MAX(completed_at) from scrape_progress table for last listing scrape time
+---
+
+## 2026-01-19 - US-006
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented book title extraction using NLP in analyzer.py
+- Files modified:
+  - analyzer.py: Implemented extract_books_from_post(), analyze_all_posts(), and helper functions
+  - db.py: Added get_posts_with_content(), insert_book(), get_book_by_title(), insert_book_mention(), get_all_books()
+- Features:
+  - Three extraction methods: italicized text (<em>/<i> tags), spaCy NER (WORK_OF_ART entities), regex patterns
+  - Context extraction: captures surrounding text (~300 chars) for each book mention
+  - Title cleaning: filters out URLs, short/long text, common phrases
+  - Lazy loading of spaCy model with auto-download if missing
+  - Progress logging showing posts processed and mentions found
+- **Learnings for future iterations:**
+  - spaCy's WORK_OF_ART entity can produce false positives (e.g., "everyone" detected as work)
+  - Use lazy imports (`from db import ...` inside functions) to avoid circular import issues
+  - Italicized text is the most reliable source of book titles in blog posts
+  - Limit NLP processing to first 100k chars to avoid memory issues with large texts
+  - The analyzer module now has dependencies: re, BeautifulSoup, spacy
 ---
