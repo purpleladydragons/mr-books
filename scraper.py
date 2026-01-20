@@ -6,7 +6,8 @@ import time
 import random
 import cloudscraper
 from bs4 import BeautifulSoup
-from db import insert_post, record_page_scraped, get_last_scraped_page
+from db import (insert_post, record_page_scraped, get_last_scraped_page,
+                get_posts_without_content, get_total_post_count, update_post_content)
 
 
 BASE_URL = "https://marginalrevolution.com/marginalrevolution/category/books"
@@ -126,6 +127,98 @@ def scrape_category_listing():
             current_url = None
 
 
+def fetch_with_retry(url, max_retries=3):
+    """Fetch a URL with retry logic and exponential backoff.
+
+    Args:
+        url: The URL to fetch
+        max_retries: Maximum number of retry attempts (default 3)
+
+    Returns:
+        Response object if successful, None if all retries failed
+    """
+    for attempt in range(max_retries):
+        try:
+            response = scraper.get(url, timeout=30)
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            if attempt < max_retries - 1:
+                # Exponential backoff: 2^attempt seconds (2, 4, 8...)
+                backoff = 2 ** (attempt + 1)
+                print(f"  Retry {attempt + 1}/{max_retries} after {backoff}s: {e}")
+                time.sleep(backoff)
+            else:
+                print(f"  Failed after {max_retries} retries: {e}")
+                return None
+
+
 def scrape_post_content():
     """Scrape the full content of each post."""
-    pass
+    posts = get_posts_without_content()
+    total_posts = get_total_post_count()
+    posts_to_scrape = len(posts)
+
+    if posts_to_scrape == 0:
+        print("All posts already have content scraped.")
+        return
+
+    print(f"Found {posts_to_scrape} posts to scrape (out of {total_posts} total)")
+
+    for idx, (post_id, url, title) in enumerate(posts, 1):
+        scraped_count = total_posts - posts_to_scrape + idx
+        print(f"Scraping post {scraped_count}/{total_posts}: {title[:50]}...")
+
+        response = fetch_with_retry(url)
+        if response is None:
+            print(f"  Skipping post due to network errors")
+            continue
+
+        soup = BeautifulSoup(response.text, 'lxml')
+
+        # Find the main post content - MR uses article or entry-content
+        content_html = ""
+        content_text = ""
+
+        # Try to find the post content in various possible containers
+        content_elem = None
+
+        # Try entry-content class (common WordPress pattern)
+        content_elem = soup.find('div', class_='entry-content')
+
+        if not content_elem:
+            # Try article tag
+            article = soup.find('article')
+            if article:
+                content_elem = article.find('div', class_='entry-content') or article
+
+        if not content_elem:
+            # Try post-content class
+            content_elem = soup.find('div', class_='post-content')
+
+        if not content_elem:
+            # Try the-content class
+            content_elem = soup.find('div', class_='the-content')
+
+        if content_elem:
+            # Remove comments section if present
+            for comments in content_elem.find_all(['div', 'section'], class_=lambda x: x and 'comment' in x.lower() if x else False):
+                comments.decompose()
+
+            # Remove sidebar elements if present
+            for sidebar in content_elem.find_all(['aside', 'div'], class_=lambda x: x and 'sidebar' in x.lower() if x else False):
+                sidebar.decompose()
+
+            content_html = str(content_elem)
+            content_text = content_elem.get_text(separator='\n', strip=True)
+        else:
+            print(f"  Warning: Could not find content element for post")
+
+        # Update the database with the scraped content
+        update_post_content(post_id, content_html, content_text)
+
+        # Delay between requests (1-2 seconds)
+        delay = random.uniform(1, 2)
+        time.sleep(delay)
+
+    print(f"Finished scraping {posts_to_scrape} posts")

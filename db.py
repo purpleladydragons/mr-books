@@ -104,6 +104,43 @@ def get_last_scraped_page():
     return result if result is not None else 0
 
 
+def get_posts_without_content():
+    """Get all posts that don't have content scraped yet."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, url, title FROM posts
+        WHERE content_text IS NULL
+        ORDER BY id
+    ''')
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+
+def get_total_post_count():
+    """Get total number of posts in the database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM posts')
+    result = cursor.fetchone()[0]
+    conn.close()
+    return result
+
+
+def update_post_content(post_id, content_html, content_text):
+    """Update a post with its scraped content."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE posts
+        SET content_html = ?, content_text = ?, scraped_at = datetime('now')
+        WHERE id = ?
+    ''', (content_html, content_text, post_id))
+    conn.commit()
+    conn.close()
+
+
 def get_scrape_status():
     """Get the current scrape status and print it to terminal."""
     pass
