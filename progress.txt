@@ -169,3 +169,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - The analyze command now runs both book extraction AND sentiment analysis in sequence
   - Sentiment scores are stored in both book_mentions and books tables for different query needs
 ---
+
+## 2026-01-19 - US-009
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented ranked book list display in db.py
+- Files modified:
+  - db.py: Implemented get_ranked_books() function
+- Features:
+  - Returns books sorted by sentiment_score descending
+  - Includes all post URLs where each book is mentioned (fetched via JOIN)
+  - Formatted terminal output: rank, title, score, post links
+  - Supports --top N flag to limit results
+  - Supports --genre filter (ready for US-010)
+  - Shows count of mentions and limits URL display to 3 per book for readability
+- **Learnings for future iterations:**
+  - The rankings command already had --top and --genre flags set up in main.py
+  - get_ranked_books() both prints AND returns data for flexibility (matches pattern from get_scrape_status())
+  - Use parameterized queries with dynamic SQL building for optional filters
+  - Limiting URL display to 3 per book prevents terminal overflow while still showing data availability
+---
