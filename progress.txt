@@ -13,6 +13,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Scraper: Post content is in `div.entry-content` class; use fetch_with_retry() for resilient requests
 - Analyzer: Use lazy imports inside functions to avoid circular imports between db.py and analyzer.py
 - Analyzer: spaCy model 'en_core_web_sm' is required; code auto-downloads if missing
+- Deduplication: Use `find_or_create_book()` from db.py instead of get_book_by_title/insert_book for fuzzy matching
+- Deduplication: `normalize_title()` strips articles ("the", "a", "an") and punctuation for comparison
+- Deduplication: Uses rapidfuzz library with token_sort_ratio for 85% similarity threshold
 ---
 
 ## 2026-01-19 - US-001
@@ -125,4 +128,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Italicized text is the most reliable source of book titles in blog posts
   - Limit NLP processing to first 100k chars to avoid memory issues with large texts
   - The analyzer module now has dependencies: re, BeautifulSoup, spacy
+---
+
+## 2026-01-19 - US-007
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented book deduplication using fuzzy string matching in db.py
+- Files modified:
+  - db.py: Added normalize_title() and find_or_create_book() functions
+  - analyzer.py: Updated extract_books_from_post() to use find_or_create_book()
+  - requirements.txt: Added rapidfuzz dependency
+- Features:
+  - normalize_title(): strips leading articles (the, a, an), removes punctuation, lowercases
+  - find_or_create_book(): uses rapidfuzz token_sort_ratio for fuzzy matching
+  - 85% similarity threshold for considering titles as the same book
+  - Correctly deduplicates "The Great Gatsby" vs "Great Gatsby" (100% match after normalization)
+- **Learnings for future iterations:**
+  - rapidfuzz is faster than python-Levenshtein and fuzzywuzzy
+  - token_sort_ratio handles word order differences (e.g., "Tale Two Cities" vs "Two Cities Tale")
+  - When comparing many titles, normalizing first reduces redundant computation
+  - The find_or_create_book() function should be used everywhere books are created for consistency
 ---
