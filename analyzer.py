@@ -203,8 +203,219 @@ def analyze_sentiment(context_text):
     return scores['compound']
 
 
-def analyze_book_mentions():
-    """Analyze sentiment for all unanalyzed book mentions and update book scores."""
+def is_interview_or_transcript(text):
+    """Detect if text appears to be from an interview or transcript.
+
+    Interview/transcript posts typically have speaker tags like:
+    - 'TYLER COWEN:', 'TYLER:', 'TC:'
+    - 'GUEST:', 'RUSS ROBERTS:', 'Name:'
+    - Lines starting with a name followed by a colon
+
+    Returns True if the text appears to be from an interview/transcript.
+    """
+    if not text:
+        return False
+
+    # Common speaker tag patterns
+    speaker_patterns = [
+        r'^[A-Z][A-Z\s]+:',  # ALL CAPS NAME:
+        r'^[A-Z][a-z]+\s+[A-Z][a-z]+:',  # First Last:
+        r'^TYLER\s*(COWEN)?:',  # TYLER: or TYLER COWEN:
+        r'^TC:',  # TC:
+        r'^GUEST:',
+        r'^HOST:',
+        r'^INTERVIEWER:',
+        r'^Q:',  # Q: for questions
+        r'^A:',  # A: for answers
+    ]
+
+    # Check if multiple lines match speaker patterns (need at least 2 different speakers)
+    lines = text.split('\n')
+    speaker_lines = 0
+    for line in lines:
+        line = line.strip()
+        for pattern in speaker_patterns:
+            if re.match(pattern, line, re.IGNORECASE):
+                speaker_lines += 1
+                break
+
+    # If at least 2 speaker-tagged lines, likely a transcript
+    return speaker_lines >= 2
+
+
+def extract_tyler_opinion(text, book_title):
+    """Extract only Tyler Cowen's opinion from interview/transcript text.
+
+    Args:
+        text: The full context text
+        book_title: The book title being discussed
+
+    Returns:
+        Tyler's opinion text if found, None if Tyler doesn't express an opinion
+    """
+    if not text or not book_title:
+        return None
+
+    lines = text.split('\n')
+    tyler_sections = []
+    current_speaker = None
+    current_text = []
+
+    # Patterns that indicate Tyler is speaking
+    tyler_patterns = [
+        r'^TYLER\s*(COWEN)?:',
+        r'^TC:',
+    ]
+
+    # Patterns that indicate someone else is speaking
+    other_speaker_pattern = r'^[A-Z][A-Z\s]*:|^[A-Z][a-z]+\s+[A-Z][a-z]+:'
+
+    for line in lines:
+        line_stripped = line.strip()
+
+        # Check if this line starts a new speaker section
+        is_tyler = any(re.match(p, line_stripped, re.IGNORECASE) for p in tyler_patterns)
+        is_other = re.match(other_speaker_pattern, line_stripped) and not is_tyler
+
+        if is_tyler:
+            # Save previous Tyler section if any
+            if current_speaker == 'tyler' and current_text:
+                tyler_sections.append(' '.join(current_text))
+            current_speaker = 'tyler'
+            # Remove the speaker tag from the line
+            for p in tyler_patterns:
+                line_stripped = re.sub(p, '', line_stripped, flags=re.IGNORECASE).strip()
+            current_text = [line_stripped] if line_stripped else []
+        elif is_other:
+            # Save previous Tyler section if any
+            if current_speaker == 'tyler' and current_text:
+                tyler_sections.append(' '.join(current_text))
+            current_speaker = 'other'
+            current_text = []
+        elif current_speaker:
+            # Continue the current speaker's section
+            current_text.append(line_stripped)
+
+    # Don't forget the last section
+    if current_speaker == 'tyler' and current_text:
+        tyler_sections.append(' '.join(current_text))
+
+    if not tyler_sections:
+        return None
+
+    # Find sections where Tyler mentions the book
+    book_lower = book_title.lower()
+    relevant_sections = [s for s in tyler_sections if book_lower in s.lower()]
+
+    if relevant_sections:
+        return ' '.join(relevant_sections)
+
+    # If book not mentioned in Tyler's sections, return None
+    # This means Tyler didn't express an opinion about this book
+    return None
+
+
+def analyze_sentiment_ollama(context_text, book_title=None, model='llama3.2:3b'):
+    """Analyze sentiment using Ollama LLM for better context understanding.
+
+    Args:
+        context_text: The text context where the book is mentioned
+        book_title: The title of the book (used for interview extraction)
+        model: The Ollama model to use (default: llama3.2:3b)
+
+    Returns:
+        Normalized score (-1 to 1) or None if:
+        - Text is empty
+        - Ollama is not available
+        - In interview posts where Tyler doesn't express an opinion
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    if not context_text or not context_text.strip():
+        return None
+
+    # Check if this is an interview/transcript
+    if is_interview_or_transcript(context_text):
+        # Extract only Tyler's opinion
+        tyler_text = extract_tyler_opinion(context_text, book_title)
+        if tyler_text is None:
+            # Tyler doesn't express an opinion about this book
+            return None
+        analysis_text = tyler_text
+    else:
+        # Regular post - assume all opinions are Tyler's
+        analysis_text = context_text
+
+    # Build prompt for the LLM
+    prompt = f"""Analyze Tyler Cowen's sentiment toward the book mentioned in this text.
+
+Text:
+{analysis_text}
+
+Rate Tyler Cowen's sentiment toward the book on a scale of 1-10:
+- 1-2: Very negative (strongly dislikes, criticizes, warns against)
+- 3-4: Negative (dislikes, has significant concerns)
+- 5-6: Neutral (mentions without strong opinion, mixed feelings)
+- 7-8: Positive (likes, recommends)
+- 9-10: Very positive (loves, highly recommends, enthusiastic)
+
+Respond with ONLY a single number from 1 to 10. Do not include any explanation."""
+
+    # Call Ollama API
+    try:
+        url = 'http://localhost:11434/api/generate'
+        data = json.dumps({
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'options': {
+                'temperature': 0.1,  # Low temperature for consistent ratings
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            response_text = result.get('response', '').strip()
+
+            # Parse the numeric response
+            # Try to extract a number from the response
+            numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', response_text)
+            if numbers:
+                score = float(numbers[0])
+                # Clamp to 1-10 range
+                score = max(1, min(10, score))
+                # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
+                normalized = (score - 5.5) / 4.5
+                return round(normalized, 4)
+
+            print(f"Warning: Could not parse LLM response: {response_text}")
+            return None
+
+    except urllib.error.URLError as e:
+        print(f"Error: Could not connect to Ollama at localhost:11434. Is Ollama running?")
+        print(f"  - Start Ollama with: ollama serve")
+        print(f"  - Make sure model is available: ollama pull {model}")
+        raise ConnectionError(f"Ollama connection failed: {e}")
+    except Exception as e:
+        print(f"Error calling Ollama API: {e}")
+        return None
+
+
+def analyze_book_mentions(use_ollama=False, model='llama3.2:3b'):
+    """Analyze sentiment for all unanalyzed book mentions and update book scores.
+
+    Args:
+        use_ollama: If True, use Ollama LLM for sentiment analysis instead of VADER
+        model: Ollama model to use (default: llama3.2:3b)
+    """
     from db import (
         get_unanalyzed_mentions,
         update_mention_sentiment,
@@ -218,21 +429,43 @@ def analyze_book_mentions():
         print("No unanalyzed book mentions found.")
         return
 
-    print(f"Analyzing sentiment for {total} book mentions...")
+    if use_ollama:
+        print(f"Analyzing sentiment for {total} book mentions using Ollama ({model})...")
+    else:
+        print(f"Analyzing sentiment for {total} book mentions using VADER...")
 
-    for i, (mention_id, context_text) in enumerate(mentions, 1):
-        score = analyze_sentiment(context_text)
-        if score is not None:
-            update_mention_sentiment(mention_id, score)
+    skipped = 0
+    analyzed = 0
+
+    for i, (mention_id, context_text, book_title) in enumerate(mentions, 1):
+        try:
+            if use_ollama:
+                score = analyze_sentiment_ollama(context_text, book_title, model)
+            else:
+                score = analyze_sentiment(context_text)
+
+            if score is not None:
+                update_mention_sentiment(mention_id, score)
+                analyzed += 1
+            else:
+                skipped += 1
+
+        except ConnectionError:
+            # Ollama connection failed - abort
+            print(f"\nAborting: Ollama is not available. Analyzed {analyzed} mentions before error.")
+            return
+        except Exception as e:
+            print(f"\nError analyzing mention {mention_id}: {e}")
+            skipped += 1
 
         if i % 100 == 0 or i == total:
-            print(f"Analyzed {i}/{total} mentions")
+            print(f"Analyzed {i}/{total} mentions ({analyzed} scored, {skipped} skipped)")
 
     # Now update aggregated book sentiment scores
     print("Updating aggregated book sentiment scores...")
     update_book_sentiment()
 
-    print("Done!")
+    print(f"Done! Scored {analyzed} mentions, skipped {skipped}.")
 
 
 def categorize_book(content_text):
@@ -346,8 +579,13 @@ def categorize_all_books():
     print("Done!")
 
 
-def analyze_all_posts():
-    """Process all posts to extract books and analyze sentiment."""
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b'):
+    """Process all posts to extract books and analyze sentiment.
+
+    Args:
+        use_ollama: If True, use Ollama LLM for sentiment analysis instead of VADER
+        model: Ollama model to use (default: llama3.2:3b)
+    """
     from db import get_posts_with_content
 
     posts = get_posts_with_content()
@@ -371,7 +609,7 @@ def analyze_all_posts():
 
     # Now analyze sentiment for all book mentions
     print("\n--- Sentiment Analysis ---")
-    analyze_book_mentions()
+    analyze_book_mentions(use_ollama=use_ollama, model=model)
 
     # Categorize books by genre
     print("\n--- Genre Categorization ---")

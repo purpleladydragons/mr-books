@@ -30,7 +30,7 @@ def cmd_analyze(args):
     from db import init_db
 
     init_db()
-    analyze_all_posts()
+    analyze_all_posts(use_ollama=args.use_ollama, model=args.model)
 
 
 def cmd_rankings(args):
@@ -78,6 +78,17 @@ def main():
     analyze_parser = subparsers.add_parser(
         'analyze',
         help='Analyze scraped posts for book mentions and sentiment'
+    )
+    analyze_parser.add_argument(
+        '--use-ollama',
+        action='store_true',
+        help='Use Ollama LLM for sentiment analysis instead of VADER'
+    )
+    analyze_parser.add_argument(
+        '--model',
+        type=str,
+        default='llama3.2:3b',
+        help='Ollama model to use (default: llama3.2:3b)'
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 

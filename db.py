@@ -445,13 +445,18 @@ def get_all_books():
 
 
 def get_unanalyzed_mentions():
-    """Get all book mentions that haven't been analyzed for sentiment yet."""
+    """Get all book mentions that haven't been analyzed for sentiment yet.
+
+    Returns list of tuples: (mention_id, context_text, book_title)
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, context_text FROM book_mentions
-        WHERE sentiment_score IS NULL
-        ORDER BY id
+        SELECT bm.id, bm.context_text, b.title
+        FROM book_mentions bm
+        JOIN books b ON bm.book_id = b.id
+        WHERE bm.sentiment_score IS NULL
+        ORDER BY bm.id
     ''')
     mentions = cursor.fetchall()
     conn.close()
