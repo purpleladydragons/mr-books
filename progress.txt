@@ -7,6 +7,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Module functions are imported lazily inside command handlers to avoid import errors when modules are incomplete
 - Database: Use `from db import get_connection` to get SQLite connections, DB file is `mr_books.db`
 - All database tables use CREATE TABLE IF NOT EXISTS for idempotent initialization
+- Scraper: Use `cloudscraper` instead of `requests` to bypass Cloudflare protection on marginalrevolution.com
+- Scraper: Article entries are in `<article>` tags, title links have `rel='bookmark'` attribute
+- Scraper: Pagination can be found via link text "Next" or by looking for `/page/N` in href
 ---
 
 ## 2026-01-19 - US-001
@@ -39,4 +42,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - get_connection() helper function available for getting database connections
   - All tables use CREATE TABLE IF NOT EXISTS for idempotent initialization
   - book_mentions table has foreign keys to books and posts tables
+---
+
+## 2026-01-19 - US-003
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented category listing scraper in scraper.py
+- Files modified:
+  - scraper.py: Implemented scrape_category_listing() function
+  - db.py: Added insert_post(), record_page_scraped(), get_last_scraped_page() functions
+  - requirements.txt: Added cloudscraper dependency
+- Features:
+  - Uses cloudscraper to bypass Cloudflare protection
+  - Extracts post URL, title, and date from article tags
+  - Handles pagination by finding "Next" link or /page/N pattern
+  - Implements 1-2 second random delay between requests
+  - Supports resume from last scraped page using scrape_progress table
+  - Logs progress showing page number and posts found
+- **Learnings for future iterations:**
+  - marginalrevolution.com has Cloudflare protection, standard requests returns 403
+  - Use `cloudscraper.create_scraper()` to handle the JavaScript challenge automatically
+  - Post titles are in `<a rel="bookmark">` tags within `<article>` elements
+  - Dates are in `<time>` tags with `datetime` attribute
+  - Site has ~279 pages in the Books category
 ---
