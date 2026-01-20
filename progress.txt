@@ -188,3 +188,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Use parameterized queries with dynamic SQL building for optional filters
   - Limiting URL display to 3 per book prevents terminal overflow while still showing data availability
 ---
+
+## 2026-01-19 - US-010
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented genre categorization for books in analyzer.py
+- Files modified:
+  - analyzer.py: Implemented categorize_book() and categorize_all_books() functions
+  - db.py: Added get_books_without_genre(), get_book_contexts(), update_book_genre() functions
+- Features:
+  - categorize_book(): uses keyword matching on content to assign genres
+  - Supports genres: history, economics, fiction, biography, science, philosophy, other
+  - Combines both context_text and full post content for better keyword matching
+  - Requires minimum of 2 keyword matches to assign a specific genre (otherwise 'other')
+  - Integrated into analyze_all_posts() flow after sentiment analysis
+  - Rankings --genre filter already worked (was implemented in US-009)
+- **Learnings for future iterations:**
+  - The --genre flag and genre filter in get_ranked_books() were already set up in US-009
+  - Genre keywords should be ordered by specificity for better matching
+  - Combining book mention context_text with full post content provides richer data for categorization
+  - A threshold (min 2 keyword matches) helps avoid false categorizations
+---

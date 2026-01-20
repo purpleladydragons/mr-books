@@ -166,7 +166,7 @@
         "Script runs without errors"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
