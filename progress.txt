@@ -601,3 +601,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Different models have separate rate limit quotas - gemini-2.5-flash has higher limits
   - Use unified call_llm() function that dispatches based on provider parameter
 ---
+
+## 2026-01-21 - US-027
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented golden tests for book extraction and rating comparisons
+- Files created:
+  - tests/conftest.py: pytest configuration with --provider, --api-key, --model options
+  - tests/test_golden.py: 10 integration tests (5 extraction, 5 comparison)
+  - tests/fixtures/extraction_fixtures.json: 5 extraction test cases from real posts
+  - tests/fixtures/comparison_fixtures.json: 5 comparison test cases with expected winners
+- Files modified:
+  - requirements.txt: Added pytest dependency
+- Features:
+  - Extraction tests verify book titles extracted from: post titles, subtitles, multi-book posts
+  - Comparison tests verify clear sentiment differences (enthusiastic vs neutral, A+ vs overpriced)
+  - Tests call actual LLM (Ollama or Gemini) - integration tests, not mocks
+  - Fuzzy title matching handles subtitle variations and article stripping
+  - Command: pytest tests/test_golden.py -v --provider=ollama
+- **Learnings for future iterations:**
+  - pytest_addoption must be in conftest.py, not test file itself
+  - Fuzzy matching for titles: strip articles, check word overlap (60%), substring match
+  - For comparison tests, allow "A_or_TIE" expected value for close positive reviews
+  - Test fixtures from database provide realistic test cases
+  - Tests use real posts: Greek Math ("best science books ever"), McCartney ("A+"), Kerala ("overpriced")
+---

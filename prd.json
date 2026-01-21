@@ -473,6 +473,26 @@
       "priority": 26,
       "passes": true,
       "notes": "Implemented with google-genai package (new official SDK). Uses call_llm() abstraction with provider parameter. Default model is gemini-2.5-flash. Supports --provider, --api-key, and --model flags. Rate limit handling with exponential backoff retry."
+    },
+    {
+      "id": "US-027",
+      "title": "Add golden tests for book extraction and rating comparisons",
+      "description": "As a developer, I want regression tests to ensure prompt/code changes don't break extraction or comparison behavior.",
+      "acceptanceCriteria": [
+        "Create tests/ directory with pytest setup",
+        "Add pytest to requirements.txt",
+        "Create test fixtures from real database examples (5-10 posts for extraction, 5-10 comparison pairs)",
+        "Extraction golden tests: given post content, verify expected book titles are extracted",
+        "Comparison golden tests: given two posts with known sentiment difference, verify correct winner",
+        "Store fixtures as JSON files in tests/fixtures/ (post content + expected results)",
+        "Tests should call actual LLM (Ollama or Gemini) - these are integration tests, not mocks",
+        "Add --golden flag or separate test file so golden tests can run independently",
+        "Tests pass with current prompts and serve as regression baseline",
+        "Script runs without errors: pytest tests/test_golden.py"
+      ],
+      "priority": 27,
+      "passes": true,
+      "notes": "Created test_golden.py with 5 extraction tests and 5 comparison tests. Fixtures use real posts from database. Tests call actual LLM (Ollama or Gemini via --provider flag). Tests verify: book title extraction from post titles, subtitles, multi-book posts; and sentiment comparisons with clear positive/neutral differences. All 10 tests pass with Ollama."
     }
   ]
 }
