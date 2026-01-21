@@ -349,12 +349,13 @@ def check_ollama_available(model='llama3.2:3b'):
         raise ConnectionError(f"Ollama connection failed: {e}")
 
 
-def analyze_post_with_llm(post_content, model='llama3.2:3b'):
+def analyze_post_with_llm(post_content, model='llama3.2:3b', post_title=None):
     """Analyze a full post with LLM to extract books and sentiment in one call.
 
     Args:
         post_content: The full post content_text (not a 300-char snippet)
         model: The Ollama model to use (default: llama3.2:3b)
+        post_title: Optional post title for error logging
 
     Returns:
         List of dicts: [{'book_title': str, 'sentiment_score': float, 'reasoning': str}]
@@ -461,7 +462,9 @@ Example response format:
                     try:
                         books = json.loads(match.group())
                     except json.JSONDecodeError:
-                        print(f"Warning: Could not parse JSON from LLM response")
+                        title_info = f" for post: {post_title}" if post_title else ""
+                        truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+                        print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
                         return []
                 else:
                     # No JSON array found
@@ -792,7 +795,7 @@ def analyze_posts_full_context(posts, model='llama3.2:3b'):
     for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
         try:
             # Single LLM call returns all books with sentiment
-            books = analyze_post_with_llm(content_text, model)
+            books = analyze_post_with_llm(content_text, model, post_title=title)
 
             for book_data in books:
                 book_title = book_data['book_title']
@@ -932,7 +935,9 @@ If no books are found, respond with: []"""
                     try:
                         book_titles = json.loads(match.group())
                     except json.JSONDecodeError:
-                        print(f"Warning: Could not parse JSON from LLM response")
+                        title_info = f" for post: {post_title}" if post_title else ""
+                        truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+                        print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
                         return []
                 else:
                     # No JSON array found
