@@ -496,3 +496,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Cancel remaining futures on connection error to fail fast
   - Mark posts as processed even on error to avoid infinite retry loops
 ---
+
+## 2026-01-20 - US-022
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Improved JSON parse error logging when LLM responses fail to parse
+- Files modified:
+  - analyzer.py: Updated analyze_post_with_llm() and extract_books_only()
+- Features:
+  - Added post_title parameter to analyze_post_with_llm() for error logging
+  - JSON parse errors now include post title to identify which post failed
+  - Raw LLM response logged (truncated to 500 chars to avoid log spam)
+  - Updated call site in analyze_posts_full_context() to pass title
+  - Log format: "Warning: Could not parse JSON from LLM response for post: {title}:\n{truncated_response}"
+- **Learnings for future iterations:**
+  - When adding diagnostic logging, include enough context to identify the source (e.g., post title)
+  - Truncate long outputs to avoid overwhelming logs - 500 chars is a good balance
+  - When adding parameters to existing functions, make them optional with default None for backwards compatibility
+---

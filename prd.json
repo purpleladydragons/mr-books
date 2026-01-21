@@ -385,6 +385,22 @@
       "priority": 21,
       "passes": true,
       "notes": "Implemented parallel extraction using ThreadPoolExecutor with RateLimiter class. Added --workers N flag to analyze command (default 5). Workers process posts concurrently, results collected and written to DB sequentially in batches of 50 to avoid SQLite issues. Connection errors trigger graceful shutdown of remaining workers. Progress logging shows posts processed and books found. Same pattern as US-012 (parallel scraping) and US-016 (parallel comparisons)."
+    },
+    {
+      "id": "US-022",
+      "title": "Log raw LLM response when JSON parsing fails",
+      "description": "As a developer, I want to see the actual LLM response when JSON parsing fails so I can diagnose issues.",
+      "acceptanceCriteria": [
+        "When JSON parsing fails in extract_books_only(), log the raw LLM response",
+        "Log format: 'Warning: Could not parse JSON from LLM response:\\n{raw_response}'",
+        "Truncate very long responses in log (e.g., first 500 chars) to avoid log spam",
+        "Include post title in warning so user knows which post failed",
+        "Apply same improvement to any other LLM functions that parse JSON (analyze_post_with_llm, etc.)",
+        "Script runs without errors"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": "Improved JSON parse error logging in both extract_books_only() and analyze_post_with_llm(). When parsing fails, logs now include: (1) post title to identify which post failed, (2) raw LLM response truncated to 500 chars to avoid log spam. Added post_title parameter to analyze_post_with_llm() for consistent logging."
     }
   ]
 }
