@@ -325,6 +325,26 @@
       "priority": 18,
       "passes": true,
       "notes": "Implemented sample_pairs_topk() with three-tier sampling strategy: (1) 70% top-tier comparisons with 60% focused on 'bubble' items around the cutoff, (2) 20% top vs random to verify top items, (3) 10% pure random to discover dark horses. Added compute_topk_stability() to track how much the top-k set changes between refits. _run_topk_ranking() handles periodic BT model refitting every 500 comparisons and implements early stopping after 3 consecutive stable refits (100% stability). Added --top-k flag to rank command in main.py."
+    },
+    {
+      "id": "US-019",
+      "title": "Add debug mode to log LLM comparison details",
+      "description": "As a developer, I want to see exactly what's being sent to the LLM and what it responds with for debugging.",
+      "acceptanceCriteria": [
+        "Add --debug flag to rank command",
+        "When --debug is set, log each comparison in detail before/after LLM call",
+        "Log format should include: comparison number, book A title, book B title",
+        "Log the full prompt being sent to the LLM (both review contexts)",
+        "Log the raw LLM response before parsing",
+        "Log the parsed result (A, B, or TIE) and any parsing issues",
+        "Add separator lines between comparisons for readability",
+        "Recommend using with --workers 1 to keep output sequential and readable",
+        "Optionally write debug logs to a file (--debug-log comparisons.log) to avoid terminal spam",
+        "Script runs without errors: python main.py rank --comparisons 10 --debug --workers 1"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "Added --debug and --debug-log flags to rank command. Modified compare_pair_with_llm() to return debug info dict when debug=True (title_a, title_b, prompt, raw_response, parsed_result, error). compare_pairs_parallel() formats and outputs debug info with separator lines between comparisons. Debug output shows comparison number, book titles, full prompt, raw LLM response, and parsed result. Supports file output via --debug-log FILE. Shows recommendation for --workers 1 when debug mode is enabled. All three ranking modes (random, adaptive, top-k) support debug mode."
     }
   ]
 }

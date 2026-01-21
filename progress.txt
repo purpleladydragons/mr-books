@@ -37,6 +37,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Bradley-Terry (Top-k): Use --top-k N flag to focus on identifying top N items; refits every 500 comparisons
 - Bradley-Terry (Top-k): sample_pairs_topk() uses 70% top-tier, 20% top-vs-random, 10% random; prioritizes "bubble" items
 - Bradley-Terry (Top-k): Early stopping after 3 consecutive stable refits (100% stability in top-k set)
+- Debug Mode: Use --debug with rank command; compare_pair_with_llm() returns dict when debug=True for detailed logging
+- Debug Mode: Use --debug-log FILE to write debug output to file instead of terminal
 ---
 
 ## 2026-01-19 - US-001
@@ -414,4 +416,31 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Refitting every 500 (not 1000) makes sense for top-k since the focus is narrower
   - Early stopping on stability can save significant compute when top-k converges
   - _get_topk_set() helper is useful for comparing sets across iterations
+---
+## 2026-01-20 - US-019
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented debug mode for LLM comparison logging in rank command
+- Files modified:
+  - main.py: Added --debug and --debug-log flags to rank command, passed to run_pairwise_ranking()
+  - analyzer.py: Modified compare_pair_with_llm(), compare_pairs_parallel(), run_pairwise_ranking(), _run_adaptive_ranking(), _run_topk_ranking()
+- Features:
+  - --debug flag enables detailed logging of each LLM comparison
+  - --debug-log FILE writes debug output to file instead of terminal
+  - compare_pair_with_llm() returns debug info dict when debug=True: title_a, title_b, prompt, raw_response, parsed_result, error
+  - Debug output format includes:
+    - Comparison number
+    - Book A and Book B titles
+    - Full prompt sent to LLM
+    - Raw LLM response before parsing
+    - Parsed result (A, B, or TIE) and any parsing issues
+    - Separator lines for readability
+  - Shows tip about using --workers 1 when debug mode is enabled
+  - Supports file output mode for reviewing logs without terminal spam
+  - All three ranking modes (random, adaptive, top-k) support debug mode
+- **Learnings for future iterations:**
+  - When adding debug mode, pass debug params through the entire call chain
+  - Debug dict return vs tuple return requires conditional handling in caller
+  - File mode debug logging needs proper cleanup with try/finally to close file handle
+  - Thread-safe counter with lock needed for comparison numbering in parallel mode
+  - Showing tips/recommendations (like --workers 1) helps user experience
 ---
