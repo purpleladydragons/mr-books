@@ -471,8 +471,8 @@
         "Script runs without errors: python main.py rank --comparisons 1000 --provider gemini --workers 10"
       ],
       "priority": 26,
-      "passes": false,
-      "notes": "Ollama on local laptop is slow for large comparison jobs. Gemini Flash 2.5 Lite is fast and cheap. Could also consider OpenRouter as a unified API, but direct Gemini integration is simpler to start. API key can be passed via --api-key or GEMINI_API_KEY env var."
+      "passes": true,
+      "notes": "Implemented with google-genai package (new official SDK). Uses call_llm() abstraction with provider parameter. Default model is gemini-2.5-flash. Supports --provider, --api-key, and --model flags. Rate limit handling with exponential backoff retry."
     }
   ]
 }

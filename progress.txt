@@ -48,6 +48,10 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - JSON Cleanup: State machine approach tracks in_quotes flag to distinguish inside/outside string content
 - Fallback Extraction: Use extract_titles_from_malformed_response() when JSON parsing fails; extracts from quoted strings and lists
 - LLM Prompts: Explicitly tell LLM "Return ONLY valid JSON. Do NOT use markdown formatting like * or _" to reduce parsing issues
+- LLM Provider: Use google-genai package for Gemini (NOT deprecated google-generativeai)
+- LLM Provider: API pattern: `from google import genai; client = genai.Client(api_key=...); client.models.generate_content(model=..., contents=...)`
+- LLM Provider: Use call_llm(prompt, provider='ollama'/'gemini', model=None, api_key=None) for unified LLM calls
+- LLM Provider: Default models: llama3.2:3b for ollama, gemini-2.5-flash for gemini
 - Incremental Saving: Use save_callback param in compare_pairs_parallel() to save results every 500 comparisons
 - Incremental Saving: Handle KeyboardInterrupt with double try/except pattern: inner for futures loop, outer for final cleanup
 - Incremental Saving: On Ctrl+C, save pending comparisons and fit BT model before exit to preserve rankings
@@ -577,4 +581,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Catch KeyboardInterrupt inside as_completed loop, cancel remaining futures, then re-raise
   - Double try/except pattern: inner for futures loop, outer for final cleanup
   - On interruption, still fit BT model with saved data to preserve rankings
+---
+
+## 2026-01-21 - US-026
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Added Google Gemini as an alternative LLM provider to Ollama
+- Uses google-genai package (new official SDK, not deprecated google-generativeai)
+- Implemented unified LLM abstraction with call_llm(), call_ollama(), call_gemini()
+- Added check_provider_available() for unified provider validation
+- Added --provider (ollama/gemini), --api-key, and --model flags
+- Files modified:
+  - requirements.txt: Added google-genai
+  - analyzer.py: Added Gemini support with call_gemini(), check_gemini_available(), updated all LLM functions
+  - main.py: Added --provider and --api-key arguments to analyze and rank commands
+- Default model: gemini-2.5-flash (has higher free tier quota than gemini-2.0-flash-lite)
+- **Learnings for future iterations:**
+  - Use google-genai package, NOT deprecated google-generativeai
+  - API: `from google import genai; client = genai.Client(api_key=...); client.models.generate_content(...)`
+  - Different models have separate rate limit quotas - gemini-2.5-flash has higher limits
+  - Use unified call_llm() function that dispatches based on provider parameter
 ---

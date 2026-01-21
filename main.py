@@ -32,12 +32,14 @@ def cmd_analyze(args):
     init_db()
     analyze_all_posts(
         use_ollama=args.use_ollama,
-        model=args.model,
+        model=args.model if args.model else None,
         reextract=args.reextract,
         full_context=args.full_context,
         extract_only=args.extract_only,
         workers=args.workers,
-        reset=args.reset
+        reset=args.reset,
+        provider=args.provider,
+        api_key=args.api_key
     )
 
 
@@ -64,12 +66,14 @@ def cmd_rank(args):
     init_db()
     run_pairwise_ranking(
         n_comparisons=args.comparisons,
-        model=args.model,
+        model=args.model if args.model else None,
         workers=args.workers,
         adaptive=args.adaptive,
         top_k=args.top_k,
         debug=args.debug,
-        debug_log=args.debug_log
+        debug_log=args.debug_log,
+        provider=args.provider,
+        api_key=args.api_key
     )
 
 
@@ -114,13 +118,26 @@ def main():
     analyze_parser.add_argument(
         '--use-ollama',
         action='store_true',
-        help='Use Ollama LLM for sentiment analysis instead of VADER'
+        help='Use LLM for sentiment analysis instead of VADER'
+    )
+    analyze_parser.add_argument(
+        '--provider',
+        type=str,
+        choices=['ollama', 'gemini'],
+        default='ollama',
+        help='LLM provider to use (default: ollama)'
+    )
+    analyze_parser.add_argument(
+        '--api-key',
+        type=str,
+        default=None,
+        help='API key for Gemini (or set GEMINI_API_KEY environment variable)'
     )
     analyze_parser.add_argument(
         '--model',
         type=str,
-        default='llama3.2:3b',
-        help='Ollama model to use (default: llama3.2:3b)'
+        default=None,
+        help='Model to use (default: llama3.2:3b for ollama, gemini-2.5-flash for gemini)'
     )
     analyze_parser.add_argument(
         '--reextract',
@@ -188,10 +205,23 @@ def main():
         help='Number of pairwise comparisons to make (default: 10000)'
     )
     rank_parser.add_argument(
+        '--provider',
+        type=str,
+        choices=['ollama', 'gemini'],
+        default='ollama',
+        help='LLM provider to use (default: ollama)'
+    )
+    rank_parser.add_argument(
+        '--api-key',
+        type=str,
+        default=None,
+        help='API key for Gemini (or set GEMINI_API_KEY environment variable)'
+    )
+    rank_parser.add_argument(
         '--model',
         type=str,
-        default='llama3.2:3b',
-        help='Ollama model to use (default: llama3.2:3b)'
+        default=None,
+        help='Model to use (default: llama3.2:3b for ollama, gemini-2.5-flash for gemini)'
     )
     rank_parser.add_argument(
         '--workers',

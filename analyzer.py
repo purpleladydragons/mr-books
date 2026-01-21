@@ -438,13 +438,207 @@ def check_ollama_available(model='llama3.2:3b'):
         raise ConnectionError(f"Ollama connection failed: {e}")
 
 
-def analyze_post_with_llm(post_content, model='llama3.2:3b', post_title=None):
+def check_gemini_available(api_key=None, model='gemini-2.5-flash'):
+    """Check if Gemini API is available.
+
+    Args:
+        api_key: The Gemini API key (or read from GEMINI_API_KEY env var)
+        model: The Gemini model to use (default: gemini-2.5-flash)
+
+    Returns:
+        True if Gemini is available, raises ConnectionError otherwise
+    """
+    import os
+
+    # Get API key from parameter or environment
+    key = api_key or os.environ.get('GEMINI_API_KEY')
+    if not key:
+        print("Error: Gemini API key not provided.")
+        print("  - Set GEMINI_API_KEY environment variable, or")
+        print("  - Use --api-key flag")
+        raise ConnectionError("Gemini API key not provided")
+
+    # Try a simple API call to verify the key works
+    try:
+        from google import genai
+        client = genai.Client(api_key=key)
+        # Simple test - try to generate a short response
+        response = client.models.generate_content(
+            model=model,
+            contents="Say 'ok' if you can hear me."
+        )
+        return True
+    except ImportError:
+        print("Error: google-genai package not installed.")
+        print("  - Install with: pip install google-genai")
+        raise ConnectionError("google-genai package not installed")
+    except Exception as e:
+        print(f"Error: Could not connect to Gemini API: {e}")
+        raise ConnectionError(f"Gemini connection failed: {e}")
+
+
+def check_provider_available(provider='ollama', model=None, api_key=None):
+    """Check if the selected LLM provider is available.
+
+    Args:
+        provider: 'ollama' or 'gemini'
+        model: Model name (defaults based on provider if not specified)
+        api_key: API key for Gemini (ignored for Ollama)
+
+    Returns:
+        True if provider is available, raises ConnectionError otherwise
+    """
+    if provider == 'ollama':
+        default_model = model or 'llama3.2:3b'
+        return check_ollama_available(default_model)
+    elif provider == 'gemini':
+        default_model = model or 'gemini-2.5-flash'
+        return check_gemini_available(api_key, default_model)
+    else:
+        raise ValueError(f"Unknown provider: {provider}. Use 'ollama' or 'gemini'.")
+
+
+def call_ollama(prompt, model='llama3.2:3b', temperature=0.1, timeout=120):
+    """Call Ollama API with a prompt.
+
+    Args:
+        prompt: The prompt to send
+        model: Ollama model to use
+        temperature: Sampling temperature (default: 0.1 for consistent output)
+        timeout: Request timeout in seconds
+
+    Returns:
+        Response text from the model
+
+    Raises:
+        ConnectionError: If Ollama is not available
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    url = 'http://localhost:11434/api/generate'
+    data = json.dumps({
+        'model': model,
+        'prompt': prompt,
+        'stream': False,
+        'options': {
+            'temperature': temperature,
+        }
+    }).encode('utf-8')
+
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={'Content-Type': 'application/json'}
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result.get('response', '').strip()
+    except urllib.error.URLError as e:
+        raise ConnectionError(f"Ollama connection failed: {e}")
+
+
+def call_gemini(prompt, model='gemini-2.5-flash', api_key=None, temperature=0.1, timeout=120, max_retries=3):
+    """Call Gemini API with a prompt.
+
+    Args:
+        prompt: The prompt to send
+        model: Gemini model to use (default: gemini-2.5-flash)
+        api_key: API key (or read from GEMINI_API_KEY env var)
+        temperature: Sampling temperature (default: 0.1 for consistent output)
+        timeout: Request timeout in seconds (used as request_timeout)
+        max_retries: Number of retries for rate limit errors
+
+    Returns:
+        Response text from the model
+
+    Raises:
+        ConnectionError: If Gemini API is not available
+    """
+    import os
+    import time
+
+    key = api_key or os.environ.get('GEMINI_API_KEY')
+    if not key:
+        raise ConnectionError("Gemini API key not provided")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        raise ConnectionError("google-genai package not installed")
+
+    client = genai.Client(api_key=key)
+
+    # Configure generation
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        max_output_tokens=2048,
+    )
+
+    # Retry logic for rate limits
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=config,
+            )
+            return response.text.strip()
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for rate limit errors
+            if 'rate' in error_str or '429' in error_str or 'quota' in error_str:
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
+                    print(f"Rate limit hit, waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                    continue
+            raise ConnectionError(f"Gemini API error: {e}")
+
+    raise ConnectionError("Gemini API: max retries exceeded")
+
+
+def call_llm(prompt, provider='ollama', model=None, api_key=None, temperature=0.1, timeout=120):
+    """Unified function to call LLM with any supported provider.
+
+    Args:
+        prompt: The prompt to send
+        provider: 'ollama' or 'gemini'
+        model: Model name (defaults based on provider if not specified)
+        api_key: API key for Gemini (ignored for Ollama)
+        temperature: Sampling temperature
+        timeout: Request timeout in seconds
+
+    Returns:
+        Response text from the model
+
+    Raises:
+        ConnectionError: If provider is not available
+        ValueError: If provider is unknown
+    """
+    if provider == 'ollama':
+        default_model = model or 'llama3.2:3b'
+        return call_ollama(prompt, default_model, temperature, timeout)
+    elif provider == 'gemini':
+        default_model = model or 'gemini-2.5-flash'
+        return call_gemini(prompt, default_model, api_key, temperature, timeout)
+    else:
+        raise ValueError(f"Unknown provider: {provider}. Use 'ollama' or 'gemini'.")
+
+
+def analyze_post_with_llm(post_content, model=None, post_title=None, provider='ollama', api_key=None):
     """Analyze a full post with LLM to extract books and sentiment in one call.
 
     Args:
         post_content: The full post content_text (not a 300-char snippet)
-        model: The Ollama model to use (default: llama3.2:3b)
+        model: The model to use (defaults based on provider if not specified)
         post_title: Optional post title for error logging
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         List of dicts: [{'book_title': str, 'sentiment_score': float, 'reasoning': str}]
@@ -455,8 +649,6 @@ def analyze_post_with_llm(post_content, model='llama3.2:3b', post_title=None):
         - In interview posts where Tyler doesn't express any opinions
     """
     import json
-    import urllib.request
-    import urllib.error
 
     if not post_content or not post_content.strip():
         return []
@@ -516,107 +708,87 @@ If no books are found, respond with: []
 Example response format:
 [{{"book_title": "The Great Gatsby", "sentiment_score": 8, "reasoning": "Tyler calls it a masterpiece"}}]"""
 
-    # Call Ollama API
+    # Call LLM
     try:
-        url = 'http://localhost:11434/api/generate'
-        data = json.dumps({
-            'model': model,
-            'prompt': prompt,
-            'stream': False,
-            'options': {
-                'temperature': 0.1,  # Low temperature for consistent output
-            }
-        }).encode('utf-8')
+        response_text = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1, timeout=120)
 
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
-
-        with urllib.request.urlopen(req, timeout=120) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            response_text = result.get('response', '').strip()
-
-            # Try to parse JSON from the response
-            # Handle cases where LLM adds extra text around the JSON
-            try:
-                # First try direct parse
-                books = json.loads(response_text)
-            except json.JSONDecodeError:
-                # Try to extract JSON array from the response
-                # Look for [...] pattern
-                match = re.search(r'\[.*\]', response_text, re.DOTALL)
-                if match:
-                    try:
-                        books = json.loads(match.group())
-                    except json.JSONDecodeError:
-                        title_info = f" for post: {post_title}" if post_title else ""
-                        truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
-                        print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
-                        return []
-                else:
-                    # No JSON array found
+        # Try to parse JSON from the response
+        # Handle cases where LLM adds extra text around the JSON
+        books = None
+        try:
+            # First try direct parse
+            books = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Try to extract JSON array from the response
+            # Look for [...] pattern
+            match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if match:
+                try:
+                    books = json.loads(match.group())
+                except json.JSONDecodeError:
+                    title_info = f" for post: {post_title}" if post_title else ""
+                    truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+                    print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
                     return []
-
-            # Validate and normalize the response
-            if not isinstance(books, list):
+            else:
+                # No JSON array found
                 return []
 
-            normalized_books = []
-            for book in books:
-                if not isinstance(book, dict):
-                    continue
-                if 'book_title' not in book or 'sentiment_score' not in book:
-                    continue
+        # Validate and normalize the response
+        if not isinstance(books, list):
+            return []
 
-                title = book.get('book_title', '').strip()
-                if not title or len(title) < 3:
-                    continue
+        normalized_books = []
+        for book in books:
+            if not isinstance(book, dict):
+                continue
+            if 'book_title' not in book or 'sentiment_score' not in book:
+                continue
 
-                try:
-                    score = float(book.get('sentiment_score', 5.5))
-                    # Clamp to 1-10 range
-                    score = max(1, min(10, score))
-                    # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
-                    normalized_score = round((score - 5.5) / 4.5, 4)
-                except (ValueError, TypeError):
-                    normalized_score = 0.0
+            title = book.get('book_title', '').strip()
+            if not title or len(title) < 3:
+                continue
 
-                normalized_books.append({
-                    'book_title': title,
-                    'sentiment_score': normalized_score,
-                    'reasoning': book.get('reasoning', '')
-                })
+            try:
+                score = float(book.get('sentiment_score', 5.5))
+                # Clamp to 1-10 range
+                score = max(1, min(10, score))
+                # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
+                normalized_score = round((score - 5.5) / 4.5, 4)
+            except (ValueError, TypeError):
+                normalized_score = 0.0
 
-            return normalized_books
+            normalized_books.append({
+                'book_title': title,
+                'sentiment_score': normalized_score,
+                'reasoning': book.get('reasoning', '')
+            })
 
-    except urllib.error.URLError as e:
-        print(f"Error: Could not connect to Ollama at localhost:11434")
-        raise ConnectionError(f"Ollama connection failed: {e}")
+        return normalized_books
+
+    except ConnectionError:
+        raise
     except Exception as e:
-        print(f"Error calling Ollama API: {e}")
+        print(f"Error calling LLM API: {e}")
         return []
 
 
-def analyze_sentiment_ollama(context_text, book_title=None, model='llama3.2:3b'):
-    """Analyze sentiment using Ollama LLM for better context understanding.
+def analyze_sentiment_llm(context_text, book_title=None, model=None, provider='ollama', api_key=None):
+    """Analyze sentiment using LLM for better context understanding.
 
     Args:
         context_text: The text context where the book is mentioned
         book_title: The title of the book (used for interview extraction)
-        model: The Ollama model to use (default: llama3.2:3b)
+        model: The model to use (defaults based on provider if not specified)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         Normalized score (-1 to 1) or None if:
         - Text is empty
-        - Ollama is not available
+        - LLM is not available
         - In interview posts where Tyler doesn't express an opinion
     """
-    import json
-    import urllib.request
-    import urllib.error
-
     if not context_text or not context_text.strip():
         return None
 
@@ -647,50 +819,35 @@ Rate Tyler Cowen's sentiment toward the book on a scale of 1-10:
 
 Respond with ONLY a single number from 1 to 10. Do not include any explanation."""
 
-    # Call Ollama API
+    # Call LLM
     try:
-        url = 'http://localhost:11434/api/generate'
-        data = json.dumps({
-            'model': model,
-            'prompt': prompt,
-            'stream': False,
-            'options': {
-                'temperature': 0.1,  # Low temperature for consistent ratings
-            }
-        }).encode('utf-8')
+        response_text = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1, timeout=60)
 
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
+        # Parse the numeric response
+        # Try to extract a number from the response
+        numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', response_text)
+        if numbers:
+            score = float(numbers[0])
+            # Clamp to 1-10 range
+            score = max(1, min(10, score))
+            # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
+            normalized = (score - 5.5) / 4.5
+            return round(normalized, 4)
 
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            response_text = result.get('response', '').strip()
-
-            # Parse the numeric response
-            # Try to extract a number from the response
-            numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', response_text)
-            if numbers:
-                score = float(numbers[0])
-                # Clamp to 1-10 range
-                score = max(1, min(10, score))
-                # Normalize to -1 to 1 scale: (score - 5.5) / 4.5
-                normalized = (score - 5.5) / 4.5
-                return round(normalized, 4)
-
-            print(f"Warning: Could not parse LLM response: {response_text}")
-            return None
-
-    except urllib.error.URLError as e:
-        print(f"Error: Could not connect to Ollama at localhost:11434. Is Ollama running?")
-        print(f"  - Start Ollama with: ollama serve")
-        print(f"  - Make sure model is available: ollama pull {model}")
-        raise ConnectionError(f"Ollama connection failed: {e}")
-    except Exception as e:
-        print(f"Error calling Ollama API: {e}")
+        print(f"Warning: Could not parse LLM response: {response_text}")
         return None
+
+    except ConnectionError:
+        raise
+    except Exception as e:
+        print(f"Error calling LLM API: {e}")
+        return None
+
+
+# Alias for backwards compatibility
+def analyze_sentiment_ollama(context_text, book_title=None, model='llama3.2:3b'):
+    """Backwards-compatible wrapper for analyze_sentiment_llm with Ollama."""
+    return analyze_sentiment_llm(context_text, book_title, model=model, provider='ollama')
 
 
 def analyze_book_mentions(use_ollama=False, model='llama3.2:3b'):
@@ -863,7 +1020,7 @@ def categorize_all_books():
     print("Done!")
 
 
-def analyze_posts_full_context(posts, model='llama3.2:3b'):
+def analyze_posts_full_context(posts, model=None, provider='ollama', api_key=None):
     """Process posts using full-context LLM analysis.
 
     This mode uses a single LLM call per post to extract all books and their
@@ -871,7 +1028,9 @@ def analyze_posts_full_context(posts, model='llama3.2:3b'):
 
     Args:
         posts: List of tuples (id, url, title, content_html, content_text)
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
     """
     from db import find_or_create_book, insert_book_mention_with_sentiment, mark_post_books_extracted
 
@@ -879,12 +1038,12 @@ def analyze_posts_full_context(posts, model='llama3.2:3b'):
     total_books_found = 0
     errors = 0
 
-    print(f"Analyzing {total} posts with full-context LLM mode...")
+    print(f"Analyzing {total} posts with full-context LLM mode using {provider}...")
 
     for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
         try:
             # Single LLM call returns all books with sentiment
-            books = analyze_post_with_llm(content_text, model, post_title=title)
+            books = analyze_post_with_llm(content_text, model=model, post_title=title, provider=provider, api_key=api_key)
 
             for book_data in books:
                 book_title = book_data['book_title']
@@ -922,7 +1081,7 @@ def analyze_posts_full_context(posts, model='llama3.2:3b'):
     return total_books_found, errors
 
 
-def extract_books_only(post_title, post_content, model='llama3.2:3b'):
+def extract_books_only(post_title, post_content, model=None, provider='ollama', api_key=None):
     """Extract ONLY book titles from a post using LLM (no sentiment/reasoning).
 
     This function asks the LLM to identify all book titles mentioned in the post,
@@ -931,7 +1090,9 @@ def extract_books_only(post_title, post_content, model='llama3.2:3b'):
     Args:
         post_title: The title of the post (book might be mentioned here)
         post_content: The full post content_text
-        model: The Ollama model to use (default: llama3.2:3b)
+        model: The model to use (defaults based on provider if not specified)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         List of book title strings, or empty list if:
@@ -941,8 +1102,6 @@ def extract_books_only(post_title, post_content, model='llama3.2:3b'):
         - In interview posts where Tyler doesn't mention any books
     """
     import json
-    import urllib.request
-    import urllib.error
 
     if not post_content or not post_content.strip():
         return []
@@ -993,83 +1152,64 @@ Example: ["The Great Gatsby", "Thinking Fast and Slow: Why We Make Bad Decisions
 
 If no books are found, respond with: []"""
 
-    # Call Ollama API
+    # Call LLM
     try:
-        url = 'http://localhost:11434/api/generate'
-        data = json.dumps({
-            'model': model,
-            'prompt': prompt,
-            'stream': False,
-            'options': {
-                'temperature': 0.1,  # Low temperature for consistent output
-            }
-        }).encode('utf-8')
+        response_text = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1, timeout=120)
 
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
+        # Clean markdown formatting from the response before JSON parsing
+        cleaned_response = clean_markdown_from_json(response_text)
 
-        with urllib.request.urlopen(req, timeout=120) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            response_text = result.get('response', '').strip()
+        # Try to parse JSON from the response
+        # Handle cases where LLM adds extra text around the JSON
+        book_titles = None
+        try:
+            # First try direct parse on cleaned response
+            book_titles = json.loads(cleaned_response)
+        except json.JSONDecodeError:
+            # Try to extract JSON array from the cleaned response
+            # Look for [...] pattern
+            match = re.search(r'\[.*\]', cleaned_response, re.DOTALL)
+            if match:
+                try:
+                    book_titles = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass  # Will fall through to fallback extraction
 
-            # Clean markdown formatting from the response before JSON parsing
-            cleaned_response = clean_markdown_from_json(response_text)
-
-            # Try to parse JSON from the response
-            # Handle cases where LLM adds extra text around the JSON
-            book_titles = None
-            try:
-                # First try direct parse on cleaned response
-                book_titles = json.loads(cleaned_response)
-            except json.JSONDecodeError:
-                # Try to extract JSON array from the cleaned response
-                # Look for [...] pattern
-                match = re.search(r'\[.*\]', cleaned_response, re.DOTALL)
-                if match:
-                    try:
-                        book_titles = json.loads(match.group())
-                    except json.JSONDecodeError:
-                        pass  # Will fall through to fallback extraction
-
-            # If JSON parsing failed, try fallback regex extraction
-            if book_titles is None:
-                fallback_titles = extract_titles_from_malformed_response(response_text)
-                if fallback_titles:
-                    print(f"Note: Used fallback extraction for post: {post_title}")
-                    book_titles = fallback_titles
-                else:
-                    title_info = f" for post: {post_title}" if post_title else ""
-                    truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
-                    print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
-                    return []
-
-            # Validate the response
-            if not isinstance(book_titles, list):
+        # If JSON parsing failed, try fallback regex extraction
+        if book_titles is None:
+            fallback_titles = extract_titles_from_malformed_response(response_text)
+            if fallback_titles:
+                print(f"Note: Used fallback extraction for post: {post_title}")
+                book_titles = fallback_titles
+            else:
+                title_info = f" for post: {post_title}" if post_title else ""
+                truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+                print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
                 return []
 
-            # Filter and clean the titles
-            valid_titles = []
-            for title in book_titles:
-                if not isinstance(title, str):
-                    continue
-                title = title.strip()
-                if title and len(title) >= 3 and len(title) <= 200:
-                    valid_titles.append(title)
+        # Validate the response
+        if not isinstance(book_titles, list):
+            return []
 
-            return valid_titles
+        # Filter and clean the titles
+        valid_titles = []
+        for title in book_titles:
+            if not isinstance(title, str):
+                continue
+            title = title.strip()
+            if title and len(title) >= 3 and len(title) <= 200:
+                valid_titles.append(title)
 
-    except urllib.error.URLError as e:
-        print(f"Error: Could not connect to Ollama at localhost:11434")
-        raise ConnectionError(f"Ollama connection failed: {e}")
+        return valid_titles
+
+    except ConnectionError:
+        raise
     except Exception as e:
-        print(f"Error calling Ollama API: {e}")
+        print(f"Error calling LLM API: {e}")
         return []
 
 
-def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_limit=5.0):
+def extract_books_from_posts_llm(posts, model=None, workers=5, rate_limit=5.0, provider='ollama', api_key=None):
     """Extract books from posts using LLM (extraction only, no sentiment).
 
     This function extracts book titles and stores full post content as context_text.
@@ -1079,9 +1219,11 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
 
     Args:
         posts: List of tuples (id, url, title, content_html, content_text)
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         workers: Number of concurrent workers (default: 5)
         rate_limit: Max requests per second across all workers (default: 5.0)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         Tuple: (total_books_found, errors)
@@ -1096,7 +1238,7 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
     if total == 0:
         return 0, 0
 
-    print(f"Extracting books from {total} posts with {workers} workers...")
+    print(f"Extracting books from {total} posts with {workers} workers using {provider}...")
 
     # Rate limiter to control request rate across workers
     class RateLimiter:
@@ -1122,7 +1264,7 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
 
         try:
             # LLM call returns list of book title strings
-            book_titles = extract_books_only(post_title, content_text, model)
+            book_titles = extract_books_only(post_title, content_text, model=model, provider=provider, api_key=api_key)
 
             # Build full context: post title + content
             full_context = f"{post_title}\n\n{content_text}" if post_title else content_text
@@ -1220,41 +1362,48 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
     return total_books_found, errors
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False, workers=5, reset=False):
+def analyze_all_posts(use_ollama=False, model=None, reextract=False, full_context=False, extract_only=False, workers=5, reset=False, provider='ollama', api_key=None):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
-        use_ollama: If True, use Ollama LLM for sentiment analysis instead of VADER
-        model: Ollama model to use (default: llama3.2:3b)
+        use_ollama: If True, use LLM for sentiment analysis instead of VADER (deprecated, use provider instead)
+        model: The model to use (defaults based on provider if not specified)
         reextract: If True, re-extract books from all posts (ignore cache)
-        full_context: If True, use full post content with single LLM call per post (requires --use-ollama)
+        full_context: If True, use full post content with single LLM call per post (requires LLM)
         extract_only: If True, only extract book titles (no sentiment). Incremental by default.
         workers: Number of concurrent workers for LLM extraction (default: 5)
         reset: If True (with extract_only), clear existing data and reprocess all posts
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
     """
     from db import (
         get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment,
         clear_books_data, reset_extraction_cache, get_extraction_counts
     )
 
-    # extract_only requires use_ollama
+    # If provider is gemini, implicitly set use_ollama to True (for LLM mode)
+    if provider == 'gemini':
+        use_ollama = True
+
+    # extract_only requires LLM
     if extract_only and not use_ollama:
-        print("Warning: --extract-only requires --use-ollama. Enabling Ollama mode.")
+        print("Warning: --extract-only requires LLM. Enabling LLM mode.")
         use_ollama = True
 
-    # full_context requires use_ollama
+    # full_context requires LLM
     if full_context and not use_ollama:
-        print("Warning: --full-context requires --use-ollama. Enabling Ollama mode.")
+        print("Warning: --full-context requires LLM. Enabling LLM mode.")
         use_ollama = True
 
-    # Fail fast: Check Ollama availability BEFORE starting book extraction
+    # Fail fast: Check provider availability BEFORE starting book extraction
     if use_ollama:
-        print("Checking Ollama availability...")
+        print(f"Checking {provider} availability...")
         try:
-            check_ollama_available(model)
-            print(f"Ollama is available with model '{model}'.")
+            check_provider_available(provider, model, api_key)
+            model_display = model or ('llama3.2:3b' if provider == 'ollama' else 'gemini-2.5-flash-lite')
+            print(f"{provider.capitalize()} is available with model '{model_display}'.")
         except ConnectionError:
-            print("\nAborting: Cannot proceed with --use-ollama when Ollama is not available.")
+            print(f"\nAborting: Cannot proceed when {provider} is not available.")
             return
 
     # For extract_only mode, only clear data if --reset flag is set
@@ -1290,7 +1439,7 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
         if extract_only:
             print(f"Extracting books from {total} posts (extraction only, no sentiment)...")
             # Use the new extraction-only approach with parallel processing
-            total_books_found, errors = extract_books_from_posts_llm(posts, model, workers=workers)
+            total_books_found, errors = extract_books_from_posts_llm(posts, model=model, workers=workers, provider=provider, api_key=api_key)
             print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
             if errors > 0:
                 print(f"Encountered {errors} errors during processing.")
@@ -1305,7 +1454,7 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
 
         if full_context:
             # Use the new full-context LLM approach
-            total_books_found, errors = analyze_posts_full_context(posts, model)
+            total_books_found, errors = analyze_posts_full_context(posts, model=model, provider=provider, api_key=api_key)
             print(f"\nExtracted {total_books_found} book mentions from {total} posts using full-context LLM.")
             if errors > 0:
                 print(f"Encountered {errors} errors during processing.")
@@ -1671,14 +1820,16 @@ def compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage=5):
     }
 
 
-def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b', debug=False):
+def compare_pair_with_llm(mention_a, mention_b, model=None, debug=False, provider='ollama', api_key=None):
     """Ask LLM which review is more positive about its book.
 
     Args:
         mention_a: Tuple (mention_id, book_id, book_title, context_text, post_content)
         mention_b: Tuple (mention_id, book_id, book_title, context_text, post_content)
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         debug: If True, return additional debug info
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         If debug=False:
@@ -1687,10 +1838,6 @@ def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b', debug=False
         If debug=True:
             Dict with keys: result, title_a, title_b, prompt, raw_response, parsed_result, error
     """
-    import json
-    import urllib.request
-    import urllib.error
-
     mention_a_id, book_a_id, title_a, context_a, content_a = mention_a
     mention_b_id, book_b_id, title_b, context_b, content_b = mention_b
 
@@ -1727,48 +1874,30 @@ Your answer (A, B, or TIE):"""
     }
 
     try:
-        url = 'http://localhost:11434/api/generate'
-        data = json.dumps({
-            'model': model,
-            'prompt': prompt,
-            'stream': False,
-            'options': {
-                'temperature': 0.1,
-            }
-        }).encode('utf-8')
+        response_text = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1, timeout=60)
+        debug_info['raw_response'] = response_text
 
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
+        response_upper = response_text.upper()
 
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result_json = json.loads(response.read().decode('utf-8'))
-            response_text = result_json.get('response', '').strip()
-            debug_info['raw_response'] = response_text
+        # Parse response
+        if 'TIE' in response_upper or 'EQUAL' in response_upper or 'CANNOT' in response_upper:
+            debug_info['parsed_result'] = 'TIE'
+            result = (mention_a_id, mention_b_id, None)
+        elif response_upper.startswith('A') or 'REVIEW A' in response_upper:
+            debug_info['parsed_result'] = 'A'
+            result = (mention_a_id, mention_b_id, mention_a_id)
+        elif response_upper.startswith('B') or 'REVIEW B' in response_upper:
+            debug_info['parsed_result'] = 'B'
+            result = (mention_a_id, mention_b_id, mention_b_id)
+        else:
+            # Can't parse, treat as tie
+            debug_info['parsed_result'] = 'TIE (parse failed)'
+            result = (mention_a_id, mention_b_id, None)
 
-            response_upper = response_text.upper()
-
-            # Parse response
-            if 'TIE' in response_upper or 'EQUAL' in response_upper or 'CANNOT' in response_upper:
-                debug_info['parsed_result'] = 'TIE'
-                result = (mention_a_id, mention_b_id, None)
-            elif response_upper.startswith('A') or 'REVIEW A' in response_upper:
-                debug_info['parsed_result'] = 'A'
-                result = (mention_a_id, mention_b_id, mention_a_id)
-            elif response_upper.startswith('B') or 'REVIEW B' in response_upper:
-                debug_info['parsed_result'] = 'B'
-                result = (mention_a_id, mention_b_id, mention_b_id)
-            else:
-                # Can't parse, treat as tie
-                debug_info['parsed_result'] = 'TIE (parse failed)'
-                result = (mention_a_id, mention_b_id, None)
-
-            if debug:
-                debug_info['result'] = result
-                return debug_info
-            return result
+        if debug:
+            debug_info['result'] = result
+            return debug_info
+        return result
 
     except Exception as e:
         debug_info['error'] = str(e)
@@ -1780,19 +1909,22 @@ Your answer (A, B, or TIE):"""
         return result
 
 
-def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0,
-                          debug=False, debug_log=None, save_callback=None, save_interval=500):
+def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
+                          debug=False, debug_log=None, save_callback=None, save_interval=500,
+                          provider='ollama', api_key=None):
     """Compare pairs in parallel using ThreadPoolExecutor.
 
     Args:
         pairs: List of tuples (mention_a_id, mention_b_id)
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         workers: Number of concurrent workers
         rate_limit: Max requests per second across all workers
         debug: If True, log detailed comparison info
         debug_log: File path to write debug logs (None = print to terminal)
         save_callback: Function to call to save results incrementally (takes list of results)
         save_interval: Save results every N comparisons (default 500)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
 
     Returns:
         List of tuples (mention_a_id, mention_b_id, winner_id)
@@ -1849,7 +1981,7 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
         if not mention_a or not mention_b:
             return None
 
-        return compare_pair_with_llm(mention_a, mention_b, model, debug=debug)
+        return compare_pair_with_llm(mention_a, mention_b, model=model, debug=debug, provider=provider, api_key=api_key)
 
     def format_debug_output(comparison_num, debug_info):
         """Format debug info for output."""
@@ -2022,18 +2154,20 @@ def fit_bradley_terry(comparisons, mention_ids):
         return {}
 
 
-def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False, top_k=None,
-                         debug=False, debug_log=None):
+def run_pairwise_ranking(n_comparisons=10000, model=None, workers=5, adaptive=False, top_k=None,
+                         debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run pairwise comparison ranking process.
 
     Args:
         n_comparisons: Number of pairwise comparisons to make
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         workers: Number of parallel workers
         adaptive: If True, use adaptive/uncertainty sampling with periodic refitting
         top_k: If set, focus comparisons on identifying top k items (faster convergence)
         debug: If True, log detailed LLM comparison info
         debug_log: File path to write debug logs (None = print to terminal)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
     """
     from db import (
         get_mentions_for_bt,
@@ -2046,13 +2180,14 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         get_mentions_with_bt_scores
     )
 
-    # Check Ollama availability first
-    print("Checking Ollama availability...")
+    # Check provider availability first
+    print(f"Checking {provider} availability...")
     try:
-        check_ollama_available(model)
-        print(f"Ollama is available with model '{model}'.")
+        check_provider_available(provider, model, api_key)
+        model_display = model or ('llama3.2:3b' if provider == 'ollama' else 'gemini-2.5-flash-lite')
+        print(f"{provider.capitalize()} is available with model '{model_display}'.")
     except ConnectionError:
-        print("\nAborting: Cannot proceed when Ollama is not available.")
+        print(f"\nAborting: Cannot proceed when {provider} is not available.")
         return
 
     # Debug mode recommendations
@@ -2088,12 +2223,12 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         print(f"\n=== TOP-K FOCUSED MODE ===")
         print(f"Focusing on identifying top {top_k} items.")
         print(f"Will refit BT model every 500 comparisons and stop early if top-k stabilizes.")
-        _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, debug=debug, debug_log=debug_log)
+        _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, debug=debug, debug_log=debug_log, provider=provider, api_key=api_key)
     elif adaptive:
         # Run adaptive sampling with periodic refitting
         print(f"\n=== ADAPTIVE SAMPLING MODE ===")
         print(f"Will refit BT model every 1000 comparisons to update uncertainty estimates.")
-        _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, debug=debug, debug_log=debug_log)
+        _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, debug=debug, debug_log=debug_log, provider=provider, api_key=api_key)
     else:
         # Original random sampling approach
         print(f"Sampling {n_comparisons} pairs for comparison (random)...")
@@ -2105,12 +2240,13 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
             insert_comparisons_batch(results_batch)
 
         # Run comparisons in parallel with incremental saving
-        print(f"Running pairwise comparisons with {workers} workers...")
+        print(f"Running pairwise comparisons with {workers} workers using {provider}...")
         print(f"Comparisons will be saved every 500 results to avoid losing progress.")
         try:
             results = compare_pairs_parallel(pairs, model=model, workers=workers,
                                             debug=debug, debug_log=debug_log,
-                                            save_callback=save_results, save_interval=500)
+                                            save_callback=save_results, save_interval=500,
+                                            provider=provider, api_key=api_key)
             # Final fit (results already saved incrementally)
             _fit_and_update_scores(mention_ids)
         except KeyboardInterrupt:
@@ -2121,18 +2257,20 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
 
 
 def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5,
-                          debug=False, debug_log=None):
+                          debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run adaptive ranking with periodic BT model refitting.
 
     Args:
         mention_ids: List of mention IDs
         n_comparisons: Total number of comparisons to make
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         workers: Number of parallel workers
         refit_interval: Refit BT model every N comparisons
         min_coverage: Minimum comparisons per item before focusing on uncertainty
         debug: If True, log detailed LLM comparison info
         debug_log: File path to write debug logs (None = print to terminal)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
     """
     from db import (
         get_all_comparisons,
@@ -2200,11 +2338,12 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
             insert_comparisons_batch(results_batch)
 
         # Run comparisons with incremental saving
-        print(f"Running comparisons with {workers} workers...")
+        print(f"Running comparisons with {workers} workers using {provider}...")
         try:
             results = compare_pairs_parallel(pairs, model=model, workers=workers,
                                             debug=debug, debug_log=debug_log,
-                                            save_callback=save_results, save_interval=500)
+                                            save_callback=save_results, save_interval=500,
+                                            provider=provider, api_key=api_key)
         except KeyboardInterrupt:
             print("\n\nRanking interrupted. Fitting model with saved comparisons...")
             # Update comparison counts with what we have
@@ -2290,19 +2429,21 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
 
 
 def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=500, stable_threshold=3,
-                      debug=False, debug_log=None):
+                      debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run top-k focused ranking with early stopping on stability.
 
     Args:
         mention_ids: List of mention IDs
         n_comparisons: Maximum number of comparisons to make
-        model: Ollama model to use
+        model: The model to use (defaults based on provider if not specified)
         workers: Number of parallel workers
         top_k: Target k value (focus on identifying top k items)
         refit_interval: Refit BT model every N comparisons (default 500)
         stable_threshold: Stop early if top-k stable for this many consecutive refits (default 3)
         debug: If True, log detailed LLM comparison info
         debug_log: File path to write debug logs (None = print to terminal)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini (ignored for Ollama)
     """
     from db import (
         get_all_comparisons,
@@ -2364,11 +2505,12 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
             insert_comparisons_batch(results_batch)
 
         # Run comparisons with incremental saving
-        print(f"Running comparisons with {workers} workers...")
+        print(f"Running comparisons with {workers} workers using {provider}...")
         try:
             results = compare_pairs_parallel(pairs, model=model, workers=workers,
                                             debug=debug, debug_log=debug_log,
-                                            save_callback=save_results, save_interval=500)
+                                            save_callback=save_results, save_interval=500,
+                                            provider=provider, api_key=api_key)
         except KeyboardInterrupt:
             print("\n\nRanking interrupted. Fitting model with saved comparisons...")
             # Fit and save final model
