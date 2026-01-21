@@ -345,6 +345,28 @@
       "priority": 19,
       "passes": true,
       "notes": "Added --debug and --debug-log flags to rank command. Modified compare_pair_with_llm() to return debug info dict when debug=True (title_a, title_b, prompt, raw_response, parsed_result, error). compare_pairs_parallel() formats and outputs debug info with separator lines between comparisons. Debug output shows comparison number, book titles, full prompt, raw LLM response, and parsed result. Supports file output via --debug-log FILE. Shows recommendation for --workers 1 when debug mode is enabled. All three ranking modes (random, adaptive, top-k) support debug mode."
+    },
+    {
+      "id": "US-020",
+      "title": "Fix book extraction to store full post text, not LLM reasoning",
+      "description": "As a user, I want book mentions to contain the full post text so comparisons have real content to analyze.",
+      "acceptanceCriteria": [
+        "Create new extract_books_only() function that ONLY extracts book titles, no sentiment or reasoning",
+        "LLM prompt: 'List all book titles mentioned in this post (including the post title). Return JSON array of strings.'",
+        "Include BOTH post.title AND post.content_text in the LLM prompt (book might be mentioned in post title)",
+        "Handle multiple books per post - create one book_mention per book found",
+        "Store context_text as: post.title + '\\n\\n' + post.content_text (full post, same for all books from that post)",
+        "Clear existing book_mentions and books tables before re-extraction (fresh start)",
+        "Reset posts.books_extracted_at to NULL so all posts get reprocessed",
+        "Use find_or_create_book() for deduplication (fuzzy matching still applies)",
+        "Do NOT store sentiment_score during extraction - that comes from Bradley-Terry later",
+        "Add --extract-only flag: python main.py analyze --use-ollama --extract-only",
+        "Handle interview/transcript posts: only extract books Tyler mentions or comments on",
+        "Script runs without errors: python main.py analyze --use-ollama --extract-only"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Implemented extract_books_only() function that only extracts book titles without sentiment. LLM prompt includes both post title and content. Stores full post content (title + content_text) as context_text for all books from a post. Added clear_books_data() and reset_extraction_cache() functions for fresh start. Added --extract-only flag to analyze command. Interview/transcript detection still applies - only extracts books Tyler mentions. Sentiment scores come from Bradley-Terry ranking instead of extraction."
     }
   ]
 }

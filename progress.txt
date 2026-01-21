@@ -39,6 +39,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Bradley-Terry (Top-k): Early stopping after 3 consecutive stable refits (100% stability in top-k set)
 - Debug Mode: Use --debug with rank command; compare_pair_with_llm() returns dict when debug=True for detailed logging
 - Debug Mode: Use --debug-log FILE to write debug output to file instead of terminal
+- Extract-Only Mode: Use --extract-only with analyze to extract book titles without sentiment (stores full post as context_text)
+- Extract-Only Mode: extract_books_only() returns JSON array of title strings; use insert_book_mention() without sentiment
+- Extract-Only Mode: clear_books_data() and reset_extraction_cache() clear old data for fresh start
 ---
 
 ## 2026-01-19 - US-001
@@ -443,4 +446,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - File mode debug logging needs proper cleanup with try/finally to close file handle
   - Thread-safe counter with lock needed for comparison numbering in parallel mode
   - Showing tips/recommendations (like --workers 1) helps user experience
+---
+
+## 2026-01-20 - US-020
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented extraction-only mode that stores full post text instead of LLM reasoning
+- Files modified:
+  - analyzer.py: Added extract_books_only(), extract_books_from_posts_llm() functions; modified analyze_all_posts()
+  - db.py: Added clear_books_data(), reset_extraction_cache() functions
+  - main.py: Added --extract-only flag to analyze command
+- Features:
+  - extract_books_only(): LLM prompt asks for JSON array of book title strings (no sentiment/reasoning)
+  - Includes both post.title AND post.content_text in LLM prompt (book might be in title)
+  - Stores full post context (title + '\n\n' + content_text) as context_text for all books
+  - clear_books_data(): Clears comparisons, book_mentions, books tables for fresh start
+  - reset_extraction_cache(): Resets posts.books_extracted_at to NULL for re-extraction
+  - Interview/transcript detection still applies (only extracts books Tyler mentions)
+  - No sentiment_score stored during extraction - that comes from Bradley-Terry later
+  - --extract-only flag: python main.py analyze --use-ollama --extract-only
+- **Learnings for future iterations:**
+  - Separation of concerns: extraction finds titles, Bradley-Terry handles ranking
+  - Store FULL post content as context_text so comparisons have real text to analyze
+  - Multiple books from same post have identical context_text - that's fine, LLM focuses on book title
+  - Use insert_book_mention() (not insert_book_mention_with_sentiment()) when not storing sentiment
+  - Always clear old data when doing fresh extraction to avoid stale/duplicate entries
 ---
