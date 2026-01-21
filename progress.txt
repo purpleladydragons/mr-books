@@ -55,6 +55,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Incremental Saving: Use save_callback param in compare_pairs_parallel() to save results every 500 comparisons
 - Incremental Saving: Handle KeyboardInterrupt with double try/except pattern: inner for futures loop, outer for final cleanup
 - Incremental Saving: On Ctrl+C, save pending comparisons and fit BT model before exit to preserve rankings
+- Tie Reduction: Use specific guidance in comparison prompts (superlatives, endorsements, criticism) to force LLM decisions
+- Tie Reduction: Log tie rate with "Tie rate: X% (N/M comparisons)" to track prompt effectiveness
 ---
 
 ## 2026-01-19 - US-001
@@ -624,4 +626,26 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - For comparison tests, allow "A_or_TIE" expected value for close positive reviews
   - Test fixtures from database provide realistic test cases
   - Tests use real posts: Greek Math ("best science books ever"), McCartney ("A+"), Kerala ("overpriced")
+---
+
+## 2026-01-21 - US-028
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Reduced tie rate by making comparison prompt more opinionated
+- Files modified:
+  - analyzer.py: Updated compare_pair_with_llm() prompt to discourage ties, added tie rate logging to compare_pairs_parallel()
+- Features:
+  - New prompt gives specific guidance on detecting sentiment differences:
+    - Superlatives ("best", "excellent") vs weak praise ("good", "interesting")
+    - Personal endorsements ("I loved", "one of my favorites") vs neutral descriptions
+    - Recommendation strength ("highly recommend" vs "might enjoy")
+    - Criticism level (any negatives mentioned vs pure praise)
+  - Prompt now says: "Only use TIE if the sentiments are virtually identical - this should be rare"
+  - Added tie rate logging after comparisons: "Tie rate: X% (N/M comparisons)"
+  - Tie rate dropped from ~28% to 0% in test batches (target was under 10%)
+  - All 10 golden tests pass
+- **Learnings for future iterations:**
+  - LLMs often default to "tie" or "cannot determine" when given the option - be more forceful about requiring a decision
+  - Specific examples in prompts help (superlatives, endorsement phrases, etc.)
+  - Logging tie rate at end of batch helps track prompt effectiveness over time
+  - For Bradley-Terry rankings, even small preference signals are useful - ties waste LLM calls
 ---
