@@ -1781,7 +1781,7 @@ Your answer (A, B, or TIE):"""
 
 
 def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0,
-                          debug=False, debug_log=None):
+                          debug=False, debug_log=None, save_callback=None, save_interval=500):
     """Compare pairs in parallel using ThreadPoolExecutor.
 
     Args:
@@ -1791,6 +1791,8 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
         rate_limit: Max requests per second across all workers
         debug: If True, log detailed comparison info
         debug_log: File path to write debug logs (None = print to terminal)
+        save_callback: Function to call to save results incrementally (takes list of results)
+        save_interval: Save results every N comparisons (default 500)
 
     Returns:
         List of tuples (mention_a_id, mention_b_id, winner_id)
@@ -1877,8 +1879,20 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
         lines.append(f"{'-'*60}\n")
         return '\n'.join(lines)
 
-    results = []
+    all_results = []  # All results returned at end
+    pending_results = []  # Results pending save
+    total_saved = [0]  # Track total saved for logging
     total = len(pairs)
+    interrupted = [False]  # Track if interrupted
+
+    def save_pending():
+        """Save pending results if there are any."""
+        nonlocal pending_results
+        if pending_results and save_callback:
+            save_callback(pending_results)
+            total_saved[0] += len(pending_results)
+            print(f"Saved {len(pending_results)} comparisons to database ({total_saved[0]} total)")
+            pending_results = []
 
     if debug and workers > 1:
         print("Note: Using --workers 1 recommended with --debug for sequential readable output.")
@@ -1889,38 +1903,66 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
             future_to_pair = {executor.submit(compare_single, pair): pair for pair in pairs}
 
             completed = 0
-            for future in as_completed(future_to_pair):
-                completed += 1
-                try:
-                    result = future.result()
-                    if result:
+            try:
+                for future in as_completed(future_to_pair):
+                    completed += 1
+                    try:
+                        result = future.result()
+                        if result:
+                            if debug:
+                                # result is debug_info dict
+                                with counter_lock:
+                                    comparison_counter[0] += 1
+                                    comp_num = comparison_counter[0]
+                                write_debug(format_debug_output(comp_num, result))
+                                all_results.append(result['result'])
+                                pending_results.append(result['result'])
+                            else:
+                                all_results.append(result)
+                                pending_results.append(result)
+                    except Exception as e:
                         if debug:
-                            # result is debug_info dict
-                            with counter_lock:
-                                comparison_counter[0] += 1
-                                comp_num = comparison_counter[0]
-                            write_debug(format_debug_output(comp_num, result))
-                            results.append(result['result'])
-                        else:
-                            results.append(result)
-                except Exception as e:
-                    if debug:
-                        write_debug(f"\nERROR in comparison: {e}\n")
-                    pass  # Skip failed comparisons
+                            write_debug(f"\nERROR in comparison: {e}\n")
+                        pass  # Skip failed comparisons
 
-                if not debug and (completed % 100 == 0 or completed == total):
-                    print(f"Compared {completed}/{total} pairs ({len(results)} valid)")
+                    # Save incrementally every save_interval results
+                    if save_callback and len(pending_results) >= save_interval:
+                        save_pending()
+
+                    if not debug and (completed % 100 == 0 or completed == total):
+                        print(f"Compared {completed}/{total} pairs ({len(all_results)} valid)")
+
+            except KeyboardInterrupt:
+                interrupted[0] = True
+                print(f"\n\nInterrupted! Saving {len(pending_results)} pending comparisons...")
+                # Cancel remaining futures
+                for f in future_to_pair:
+                    f.cancel()
+                raise  # Re-raise after cleanup
+
+        # Save any remaining results after normal completion
+        if pending_results:
+            save_pending()
 
         if debug:
             write_debug(f"\n{'='*60}")
-            write_debug(f"SUMMARY: Completed {len(results)} valid comparisons out of {total} pairs")
+            write_debug(f"SUMMARY: Completed {len(all_results)} valid comparisons out of {total} pairs")
             write_debug(f"{'='*60}\n")
+
+    except KeyboardInterrupt:
+        # Save pending results on Ctrl+C
+        if pending_results and save_callback:
+            save_callback(pending_results)
+            total_saved[0] += len(pending_results)
+            print(f"Saved {len(pending_results)} comparisons before exit ({total_saved[0]} total saved)")
+        print(f"\nComparisons saved. You can resume later - existing comparisons will be preserved.")
+        raise
 
     finally:
         if debug_file:
             debug_file.close()
 
-    return results
+    return all_results
 
 
 def fit_bradley_terry(comparisons, mention_ids):
@@ -2057,18 +2099,25 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         print(f"Sampling {n_comparisons} pairs for comparison (random)...")
         pairs = sample_pairs(mention_ids, n_comparisons)
 
-        # Run comparisons in parallel
+        # Create save callback for incremental saving
+        def save_results(results_batch):
+            """Save comparison results to database."""
+            insert_comparisons_batch(results_batch)
+
+        # Run comparisons in parallel with incremental saving
         print(f"Running pairwise comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers,
-                                        debug=debug, debug_log=debug_log)
-
-        # Store results
-        if results:
-            print(f"Storing {len(results)} comparison results...")
-            insert_comparisons_batch(results)
-
-        # Final fit
-        _fit_and_update_scores(mention_ids)
+        print(f"Comparisons will be saved every 500 results to avoid losing progress.")
+        try:
+            results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                            debug=debug, debug_log=debug_log,
+                                            save_callback=save_results, save_interval=500)
+            # Final fit (results already saved incrementally)
+            _fit_and_update_scores(mention_ids)
+        except KeyboardInterrupt:
+            print("\nRanking interrupted. Run again to continue - existing comparisons are preserved.")
+            # Still fit the model with whatever we have
+            _fit_and_update_scores(mention_ids)
+            return
 
 
 def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5,
@@ -2142,20 +2191,43 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
         print(f"Sampling strategy: {batch_stats['coverage']} coverage, "
               f"{batch_stats['uncertainty']} uncertainty, {batch_stats['random']} random")
 
-        # Run comparisons
-        print(f"Running comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers,
-                                        debug=debug, debug_log=debug_log)
+        # Create save callback for incremental saving within batches
+        batch_results = []  # Track results for comparison count updates
 
-        # Store results
-        if results:
-            print(f"Storing {len(results)} comparison results...")
-            insert_comparisons_batch(results)
+        def save_results(results_batch):
+            """Save comparison results to database and track for count updates."""
+            batch_results.extend(results_batch)
+            insert_comparisons_batch(results_batch)
+
+        # Run comparisons with incremental saving
+        print(f"Running comparisons with {workers} workers...")
+        try:
+            results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                            debug=debug, debug_log=debug_log,
+                                            save_callback=save_results, save_interval=500)
+        except KeyboardInterrupt:
+            print("\n\nRanking interrupted. Fitting model with saved comparisons...")
+            # Update comparison counts with what we have
+            for a, b, _ in batch_results:
+                comparison_counts[a] = comparison_counts.get(a, 0) + 1
+                comparison_counts[b] = comparison_counts.get(b, 0) + 1
+            # Fit and save final model
+            all_comparisons = get_all_comparisons()
+            scores = fit_bradley_terry(all_comparisons, mention_ids)
+            if scores:
+                score_tuples = list(scores.items())
+                for i in range(0, len(score_tuples), 1000):
+                    chunk = score_tuples[i:i+1000]
+                    update_mention_bt_scores_batch(chunk)
+            from db import update_book_bt_scores
+            update_book_bt_scores()
+            print("\nRanking interrupted. Run again to continue - existing comparisons are preserved.")
+            return
 
         total_completed += batch_size
 
-        # Update comparison counts
-        for a, b, _ in results:
+        # Update comparison counts from all batch results
+        for a, b, _ in batch_results:
             comparison_counts[a] = comparison_counts.get(a, 0) + 1
             comparison_counts[b] = comparison_counts.get(b, 0) + 1
 
@@ -2286,15 +2358,30 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         print(f"Sampling strategy: {batch_stats['top_tier']} top-tier, "
               f"{batch_stats['top_vs_random']} top-vs-random, {batch_stats['random']} random")
 
-        # Run comparisons
-        print(f"Running comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers,
-                                        debug=debug, debug_log=debug_log)
+        # Create save callback for incremental saving within batches
+        def save_results(results_batch):
+            """Save comparison results to database."""
+            insert_comparisons_batch(results_batch)
 
-        # Store results
-        if results:
-            print(f"Storing {len(results)} comparison results...")
-            insert_comparisons_batch(results)
+        # Run comparisons with incremental saving
+        print(f"Running comparisons with {workers} workers...")
+        try:
+            results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                            debug=debug, debug_log=debug_log,
+                                            save_callback=save_results, save_interval=500)
+        except KeyboardInterrupt:
+            print("\n\nRanking interrupted. Fitting model with saved comparisons...")
+            # Fit and save final model
+            all_comparisons = get_all_comparisons()
+            scores = fit_bradley_terry(all_comparisons, mention_ids)
+            if scores:
+                score_tuples = list(scores.items())
+                for i in range(0, len(score_tuples), 1000):
+                    chunk = score_tuples[i:i+1000]
+                    update_mention_bt_scores_batch(chunk)
+            update_book_bt_scores()
+            print("\nRanking interrupted. Run again to continue - existing comparisons are preserved.")
+            return
 
         total_completed += batch_size
 

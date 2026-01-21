@@ -437,6 +437,42 @@
       "priority": 24,
       "passes": true,
       "notes": "Changed --extract-only to be incremental by default. Added --reset flag for explicit fresh start. Error handling now leaves posts unextracted for retry. Added get_extraction_counts() in db.py for logging skipped/processed counts. Successful extraction (0 or more books) marks post, failed extraction leaves unextracted."
+    },
+    {
+      "id": "US-025",
+      "title": "Save comparisons incrementally to avoid losing progress",
+      "description": "As a user, I want comparisons saved periodically so I don't lose progress if the script crashes or I Ctrl+C.",
+      "acceptanceCriteria": [
+        "Save comparisons to database every 500 results (not just at end of full batch)",
+        "Modify compare_pairs_parallel() to yield results incrementally or use a callback",
+        "After each save, log: 'Saved {n} comparisons to database ({total} total)'",
+        "On Ctrl+C (KeyboardInterrupt), save any pending comparisons before exiting",
+        "Resume correctly - check existing comparisons and don't re-compare same pairs",
+        "Works for all ranking modes: random, adaptive, top-k",
+        "Script runs without errors and saves incrementally"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": "Added save_callback and save_interval parameters to compare_pairs_parallel(). Saves every 500 results to database with log message. KeyboardInterrupt handling saves pending comparisons before exit and fits BT model with saved data. All three ranking modes (random, adaptive, top-k) now use incremental saving. Existing comparisons are preserved across runs (sample_pairs functions already avoid re-comparing same pairs)."
+    },
+    {
+      "id": "US-026",
+      "title": "Add support for Google Gemini Flash as alternative to Ollama",
+      "description": "As a user, I want to use Google Gemini Flash 2.5 Lite for faster inference instead of local Ollama.",
+      "acceptanceCriteria": [
+        "Add --provider flag with options: ollama (default), gemini",
+        "Add --api-key flag or read from GEMINI_API_KEY environment variable",
+        "Implement call_gemini() function using Google's Generative AI API",
+        "Use model 'gemini-2.5-flash-lite' or allow override with --model flag",
+        "Handle Gemini API rate limits gracefully (retry with backoff)",
+        "Handle Gemini API errors with clear error messages",
+        "Works for both extraction and ranking commands",
+        "Add google-generativeai to requirements.txt",
+        "Script runs without errors: python main.py rank --comparisons 1000 --provider gemini --workers 10"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "Ollama on local laptop is slow for large comparison jobs. Gemini Flash 2.5 Lite is fast and cheap. Could also consider OpenRouter as a unified API, but direct Gemini integration is simpler to start. API key can be passed via --api-key or GEMINI_API_KEY env var."
     }
   ]
 }
