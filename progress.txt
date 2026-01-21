@@ -537,3 +537,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Prompts should be explicit about format requirements - "Return ONLY valid JSON. Do NOT use markdown."
   - For title+subtitle: instruct LLM to combine if mentioned separately (common in blog posts)
 ---
+
+## 2026-01-20 - US-024
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Made extraction incremental by default (skips already-extracted posts)
+- Added --reset flag to explicitly clear data and reprocess all posts
+- Fixed error handling to NOT mark posts as extracted on errors (enables retry)
+- Added logging for skipped vs processed post counts at start
+- Files modified:
+  - main.py: Added --reset flag to analyze command, updated help text
+  - analyzer.py: Modified analyze_all_posts() with reset parameter, updated extract_only logic, fixed error handling in extract_books_from_posts_llm()
+  - db.py: Added get_extraction_counts() function for extraction statistics
+- **Learnings for future iterations:**
+  - For incremental processing, separate "successful extraction with 0 results" from "failed extraction"
+  - Success (even 0 books) = mark as processed; Error = leave unprocessed for retry
+  - get_extraction_counts() returns (total_with_content, already_extracted, to_process) for logging
+  - --reset flag should only clear data when explicitly requested, not by default
+---

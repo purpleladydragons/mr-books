@@ -435,8 +435,8 @@
         "Script runs without errors: python main.py analyze --use-ollama --extract-only"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": "Currently --extract-only clears everything and starts fresh every time. User wants to iterate: run extraction, see failures, fix prompt/parsing, re-run to only process failures. Key distinction: successful extraction with 0 books found = mark as extracted (post just doesn't mention books). Failed extraction (error) = leave unextracted for retry."
+      "passes": true,
+      "notes": "Changed --extract-only to be incremental by default. Added --reset flag for explicit fresh start. Error handling now leaves posts unextracted for retry. Added get_extraction_counts() in db.py for logging skipped/processed counts. Successful extraction (0 or more books) marks post, failed extraction leaves unextracted."
     }
   ]
 }
