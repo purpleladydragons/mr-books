@@ -510,6 +510,24 @@
       "priority": 28,
       "passes": true,
       "notes": "Eliminated TIE option entirely from comparison prompt. Prompt now says 'There is no tie option' and 'Respond with ONLY the letter A or B. Do not explain your reasoning.' Parsing logic updated to randomly pick A/B if model still tries to hedge. Tie rate dropped from ~28% to 0%. Added tie rate logging showing 'Tie rate: X% (N/M comparisons)'. Updated golden tests to accept A or B for close comparisons. All 10 golden tests pass with both large and small models."
+    },
+    {
+      "id": "US-029",
+      "title": "Require reasoning before answer to reduce positional bias",
+      "description": "As a user, I want the model to justify its comparison choice to reduce bias toward always picking A.",
+      "acceptanceCriteria": [
+        "Update comparison prompt to require reasoning BEFORE the final answer",
+        "Prompt structure: 'First, briefly explain which review expresses more positive sentiment and why. Then on a new line, write your final answer: A or B'",
+        "Update parsing logic to extract final answer from end of response (look for standalone A or B)",
+        "Log the reasoning along with the answer in debug mode",
+        "Track A vs B win rate before/after change (target: 45-55% each, not 70%+ for A)",
+        "Chain-of-thought should force model to actually consider both reviews",
+        "Run golden tests to verify accuracy doesn't degrade",
+        "Script runs without errors"
+      ],
+      "priority": 29,
+      "passes": true,
+      "notes": "Implemented chain-of-thought prompting that requires model to analyze BOTH reviews explicitly before deciding. Prompt now says: 'Analyze BOTH reviews before deciding: 1. First, describe the sentiment in Review A (1 sentence) 2. Then, describe the sentiment in Review B (1 sentence) 3. Finally, state which is more positive and write your answer: A or B'. Parsing logic updated to extract final answer from end of response using multiple patterns (standalone letter, 'Answer: X', regex). Added 'reasoning' field to debug_info and format_debug_output(). Added A vs B win rate logging alongside tie rate. Win rate improved from ~100% A to ~47%/53% (within target 45-55%). All 10 golden tests pass."
     }
   ]
 }

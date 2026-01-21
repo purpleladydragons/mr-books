@@ -1863,13 +1863,17 @@ You MUST choose either A or B. There is no tie option. Even if the difference is
 - Recommendation strength ("highly recommend" vs "might enjoy")
 - Criticism level (any negatives mentioned vs pure praise)
 
-Respond with ONLY the letter A or B. Do not explain your reasoning. Just output the single letter."""
+Analyze BOTH reviews before deciding:
+1. First, describe the sentiment in Review A (1 sentence)
+2. Then, describe the sentiment in Review B (1 sentence)
+3. Finally, state which is more positive and write your answer: A or B"""
 
     debug_info = {
         'title_a': title_a,
         'title_b': title_b,
         'prompt': prompt,
         'raw_response': None,
+        'reasoning': None,
         'parsed_result': None,
         'error': None
     }
@@ -1878,20 +1882,58 @@ Respond with ONLY the letter A or B. Do not explain your reasoning. Just output 
         response_text = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1, timeout=60)
         debug_info['raw_response'] = response_text
 
-        response_upper = response_text.upper()
+        # Extract reasoning (everything before the final answer)
+        # and parse final answer from the END of the response
+        import re
+        response_stripped = response_text.strip()
 
-        # Parse response - no TIE option, must pick A or B
-        if response_upper.startswith('A') or 'REVIEW A' in response_upper or response_upper.strip() == 'A':
+        # Look for standalone A or B at the end of the response
+        # Check last line first
+        lines = response_stripped.split('\n')
+        last_line = lines[-1].strip().upper() if lines else ""
+
+        parsed_answer = None
+
+        # Check if last line is just "A" or "B"
+        if last_line == 'A':
+            parsed_answer = 'A'
+        elif last_line == 'B':
+            parsed_answer = 'B'
+        # Check for "Answer: A" or "Final answer: B" patterns
+        elif re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line, re.IGNORECASE):
+            match = re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line, re.IGNORECASE)
+            parsed_answer = match.group(1).upper()
+        # Check last few characters for standalone letter
+        elif re.search(r'\b([AB])\s*$', response_stripped.upper()):
+            match = re.search(r'\b([AB])\s*$', response_stripped.upper())
+            parsed_answer = match.group(1)
+        # Fallback: look for any clear A or B choice in the response
+        else:
+            # Count mentions of "Review A" vs "Review B" as winner indicators
+            a_mentions = len(re.findall(r'review\s*a\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
+            b_mentions = len(re.findall(r'review\s*b\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
+            if a_mentions > b_mentions:
+                parsed_answer = 'A'
+            elif b_mentions > a_mentions:
+                parsed_answer = 'B'
+
+        # Store reasoning (everything except the final answer line)
+        if len(lines) > 1:
+            debug_info['reasoning'] = '\n'.join(lines[:-1]).strip()
+        else:
+            debug_info['reasoning'] = response_stripped
+
+        if parsed_answer == 'A':
             debug_info['parsed_result'] = 'A'
             result = (mention_a_id, mention_b_id, mention_a_id)
-        elif response_upper.startswith('B') or 'REVIEW B' in response_upper or response_upper.strip() == 'B':
+        elif parsed_answer == 'B':
             debug_info['parsed_result'] = 'B'
             result = (mention_a_id, mention_b_id, mention_b_id)
         else:
             # Model tried to avoid choosing - randomly pick to avoid bias
             import random
             forced_choice = random.choice(['A', 'B'])
-            debug_info['parsed_result'] = f'{forced_choice} (forced from: {response_text[:50]})'
+            debug_info['parsed_result'] = f'{forced_choice} (forced from: {response_text[:100]})'
             if forced_choice == 'A':
                 result = (mention_a_id, mention_b_id, mention_a_id)
             else:
@@ -2008,6 +2050,13 @@ def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
             lines.append("(no response)")
         lines.append("-" * 40)
         lines.append("")
+        # Show extracted reasoning (chain-of-thought)
+        if debug_info.get('reasoning'):
+            lines.append("REASONING:")
+            lines.append("-" * 40)
+            lines.append(debug_info['reasoning'])
+            lines.append("-" * 40)
+            lines.append("")
         lines.append(f"PARSED RESULT: {debug_info['parsed_result']}")
         if debug_info['error']:
             lines.append(f"ERROR: {debug_info['error']}")
@@ -2079,11 +2128,20 @@ def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
         if pending_results:
             save_pending()
 
-        # Calculate and log tie rate
+        # Calculate and log tie rate and A vs B win rate
         if all_results:
             tie_count = sum(1 for r in all_results if r[2] is None)
             tie_rate = (tie_count / len(all_results)) * 100
             print(f"Tie rate: {tie_rate:.1f}% ({tie_count}/{len(all_results)} comparisons)")
+
+            # Calculate A vs B win rate (excluding ties)
+            non_tie_results = [r for r in all_results if r[2] is not None]
+            if non_tie_results:
+                a_wins = sum(1 for r in non_tie_results if r[2] == r[0])  # winner_id == mention_a_id
+                b_wins = len(non_tie_results) - a_wins
+                a_rate = (a_wins / len(non_tie_results)) * 100
+                b_rate = (b_wins / len(non_tie_results)) * 100
+                print(f"A vs B win rate: A={a_rate:.1f}% ({a_wins}), B={b_rate:.1f}% ({b_wins}) - target: 45-55% each")
 
         if debug:
             write_debug(f"\n{'='*60}")
@@ -2092,6 +2150,14 @@ def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
                 tie_count = sum(1 for r in all_results if r[2] is None)
                 tie_rate = (tie_count / len(all_results)) * 100
                 write_debug(f"Tie rate: {tie_rate:.1f}% ({tie_count}/{len(all_results)} comparisons)")
+                # A vs B win rate in debug output too
+                non_tie_results = [r for r in all_results if r[2] is not None]
+                if non_tie_results:
+                    a_wins = sum(1 for r in non_tie_results if r[2] == r[0])
+                    b_wins = len(non_tie_results) - a_wins
+                    a_rate = (a_wins / len(non_tie_results)) * 100
+                    b_rate = (b_wins / len(non_tie_results)) * 100
+                    write_debug(f"A vs B win rate: A={a_rate:.1f}% ({a_wins}), B={b_rate:.1f}% ({b_wins}) - target: 45-55% each")
             write_debug(f"{'='*60}\n")
 
     except KeyboardInterrupt:
