@@ -35,7 +35,8 @@ def cmd_analyze(args):
         model=args.model,
         reextract=args.reextract,
         full_context=args.full_context,
-        extract_only=args.extract_only
+        extract_only=args.extract_only,
+        workers=args.workers
     )
 
 
@@ -134,6 +135,12 @@ def main():
         '--extract-only',
         action='store_true',
         help='Only extract book titles (no sentiment). Clears existing books data and stores full post text as context. Use Bradley-Terry ranking for sentiment.'
+    )
+    analyze_parser.add_argument(
+        '--workers',
+        type=int,
+        default=5,
+        help='Number of concurrent workers for LLM extraction (default: 5)'
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 

@@ -961,28 +961,57 @@ If no books are found, respond with: []"""
         return []
 
 
-def extract_books_from_posts_llm(posts, model='llama3.2:3b'):
+def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_limit=5.0):
     """Extract books from posts using LLM (extraction only, no sentiment).
 
     This function extracts book titles and stores full post content as context_text.
     It does NOT compute sentiment scores - that's left for Bradley-Terry ranking.
 
+    Uses parallel processing with ThreadPoolExecutor for faster extraction.
+
     Args:
         posts: List of tuples (id, url, title, content_html, content_text)
         model: Ollama model to use
+        workers: Number of concurrent workers (default: 5)
+        rate_limit: Max requests per second across all workers (default: 5.0)
 
     Returns:
         Tuple: (total_books_found, errors)
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    import time
+
     from db import find_or_create_book, insert_book_mention, mark_post_books_extracted
 
     total = len(posts)
-    total_books_found = 0
-    errors = 0
+    if total == 0:
+        return 0, 0
 
-    print(f"Extracting books from {total} posts (extraction only, no sentiment)...")
+    print(f"Extracting books from {total} posts with {workers} workers...")
 
-    for i, (post_id, url, post_title, content_html, content_text) in enumerate(posts, 1):
+    # Rate limiter to control request rate across workers
+    class RateLimiter:
+        def __init__(self, rate):
+            self.min_interval = 1.0 / rate
+            self.last_time = 0
+            self.lock = threading.Lock()
+
+        def wait(self):
+            with self.lock:
+                now = time.time()
+                elapsed = now - self.last_time
+                if elapsed < self.min_interval:
+                    time.sleep(self.min_interval - elapsed)
+                self.last_time = time.time()
+
+    rate_limiter = RateLimiter(rate_limit)
+
+    def extract_single_post(post):
+        """Worker function for extracting books from a single post."""
+        post_id, url, post_title, content_html, content_text = post
+        rate_limiter.wait()
+
         try:
             # LLM call returns list of book title strings
             book_titles = extract_books_only(post_title, content_text, model)
@@ -990,35 +1019,103 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b'):
             # Build full context: post title + content
             full_context = f"{post_title}\n\n{content_text}" if post_title else content_text
 
-            for book_title in book_titles:
-                # Use fuzzy matching for deduplication
-                book_id = find_or_create_book(book_title)
-                if book_id is None:
-                    continue
+            return {
+                'post_id': post_id,
+                'post_title': post_title,
+                'book_titles': book_titles,
+                'full_context': full_context,
+                'error': None
+            }
 
-                # Insert book mention with full post content as context (no sentiment)
-                insert_book_mention(book_id, post_id, full_context)
-                total_books_found += 1
-
-            # Mark post as processed
-            mark_post_books_extracted(post_id)
-
-        except ConnectionError:
-            print(f"\nOllama connection failed. Stopping extraction.")
-            return total_books_found, errors
+        except ConnectionError as e:
+            return {
+                'post_id': post_id,
+                'post_title': post_title,
+                'book_titles': [],
+                'full_context': None,
+                'error': f'connection_error: {e}'
+            }
         except Exception as e:
-            print(f"\nWarning: Error processing post '{post_title}': {e}")
-            errors += 1
-            # Mark post as processed anyway to avoid re-processing on next run
-            mark_post_books_extracted(post_id)
+            return {
+                'post_id': post_id,
+                'post_title': post_title,
+                'book_titles': [],
+                'full_context': None,
+                'error': str(e)
+            }
 
-        if i % 10 == 0 or i == total:
-            print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
+    total_books_found = 0
+    errors = 0
+    completed = 0
+    connection_failed = False
+
+    # Process posts in batches to manage memory and provide progress updates
+    batch_size = 50
+    results_to_write = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all tasks
+        future_to_post = {executor.submit(extract_single_post, post): post for post in posts}
+
+        for future in as_completed(future_to_post):
+            completed += 1
+
+            try:
+                result = future.result()
+
+                if result['error']:
+                    if 'connection_error' in result['error']:
+                        print(f"\nOllama connection failed. Stopping extraction.")
+                        connection_failed = True
+                        # Cancel remaining futures
+                        for f in future_to_post:
+                            f.cancel()
+                        break
+                    else:
+                        print(f"\nWarning: Error processing post '{result['post_title']}': {result['error']}")
+                        errors += 1
+                        # Mark post as processed anyway
+                        results_to_write.append({
+                            'post_id': result['post_id'],
+                            'book_titles': [],
+                            'full_context': None,
+                            'mark_only': True
+                        })
+                else:
+                    results_to_write.append({
+                        'post_id': result['post_id'],
+                        'book_titles': result['book_titles'],
+                        'full_context': result['full_context'],
+                        'mark_only': False
+                    })
+
+            except Exception as e:
+                errors += 1
+
+            # Write results to DB in batches (sequential writes to avoid SQLite issues)
+            if len(results_to_write) >= batch_size or completed == total or connection_failed:
+                for res in results_to_write:
+                    if not res['mark_only']:
+                        for book_title in res['book_titles']:
+                            book_id = find_or_create_book(book_title)
+                            if book_id is not None:
+                                insert_book_mention(book_id, res['post_id'], res['full_context'])
+                                total_books_found += 1
+                    mark_post_books_extracted(res['post_id'])
+
+                results_to_write = []
+
+            # Progress logging
+            if completed % 50 == 0 or completed == total:
+                print(f"Processed {completed}/{total} posts, found {total_books_found} book mentions so far")
+
+            if connection_failed:
+                break
 
     return total_books_found, errors
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False):
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False, workers=5):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
@@ -1027,6 +1124,7 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
         reextract: If True, re-extract books from all posts (ignore cache)
         full_context: If True, use full post content with single LLM call per post (requires --use-ollama)
         extract_only: If True, only extract book titles (no sentiment). Clears existing data first.
+        workers: Number of concurrent workers for LLM extraction (default: 5)
     """
     from db import (
         get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment,
@@ -1076,8 +1174,8 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
     else:
         if extract_only:
             print(f"Extracting books from {total} posts (extraction only, no sentiment)...")
-            # Use the new extraction-only approach
-            total_books_found, errors = extract_books_from_posts_llm(posts, model)
+            # Use the new extraction-only approach with parallel processing
+            total_books_found, errors = extract_books_from_posts_llm(posts, model, workers=workers)
             print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
             if errors > 0:
                 print(f"Encountered {errors} errors during processing.")
