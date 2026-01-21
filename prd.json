@@ -401,6 +401,42 @@
       "priority": 22,
       "passes": true,
       "notes": "Improved JSON parse error logging in both extract_books_only() and analyze_post_with_llm(). When parsing fails, logs now include: (1) post title to identify which post failed, (2) raw LLM response truncated to 500 chars to avoid log spam. Added post_title parameter to analyze_post_with_llm() for consistent logging."
+    },
+    {
+      "id": "US-023",
+      "title": "Fix JSON parsing issues and improve book title extraction prompt",
+      "description": "As a user, I want book extraction to handle markdown in LLM responses and capture full book titles including subtitles.",
+      "acceptanceCriteria": [
+        "Pre-process LLM response to strip markdown formatting (* and _) before JSON parsing",
+        "Use regex to clean: remove * and _ that appear outside of quoted strings",
+        "Update prompt to explicitly say: 'Return ONLY valid JSON. Do NOT use markdown formatting like * or _'",
+        "Update prompt to handle title/subtitle: 'Include the full book title with subtitle if present (e.g., \"Book Title: The Subtitle\")'",
+        "Handle case where title is in post title and subtitle is mentioned in body (e.g., 'the subtitle is XYZ')",
+        "Prompt should instruct: 'If the post title contains a book title and the body mentions a subtitle, combine them'",
+        "Fallback: if JSON parsing still fails after cleanup, try to extract titles from malformed response using regex",
+        "Script runs without errors: python main.py analyze --use-ollama --extract-only --workers 5"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": "Added clean_markdown_from_json() to strip markdown (* and _) from outside quoted strings before JSON parsing. Added extract_titles_from_malformed_response() as fallback regex extraction when JSON parsing fails (extracts from quoted strings, numbered/bulleted lists). Updated prompts to explicitly request no markdown formatting and handle full titles with subtitles. Prompts now instruct LLM to combine title and subtitle if mentioned separately."
+    },
+    {
+      "id": "US-024",
+      "title": "Make extraction incremental by default, only reset with explicit flag",
+      "description": "As a user, I want extraction to skip already-processed posts by default so I can iterate on failures without re-running everything.",
+      "acceptanceCriteria": [
+        "Default behavior: only process posts where books_extracted_at IS NULL (incremental)",
+        "Remove automatic clear_books_data() and reset_extraction_cache() from --extract-only",
+        "Add --reset flag to explicitly clear data and reprocess all posts: python main.py analyze --extract-only --reset",
+        "On successful extraction (0 or more books found): mark post as extracted (set books_extracted_at)",
+        "On failed extraction (JSON parse error, LLM error, etc.): do NOT mark as extracted (leave books_extracted_at NULL)",
+        "This way failed posts get retried on next run after prompt/parsing fixes",
+        "Log count of skipped (already extracted) vs processed posts at start",
+        "Script runs without errors: python main.py analyze --use-ollama --extract-only"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Currently --extract-only clears everything and starts fresh every time. User wants to iterate: run extraction, see failures, fix prompt/parsing, re-run to only process failures. Key distinction: successful extraction with 0 books found = mark as extracted (post just doesn't mention books). Failed extraction (error) = leave unextracted for retry."
     }
   ]
 }

@@ -44,6 +44,10 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Extract-Only Mode: clear_books_data() and reset_extraction_cache() clear old data for fresh start
 - Parallel Extraction: Use --workers N flag with analyze command; extract_books_from_posts_llm() uses ThreadPoolExecutor + RateLimiter
 - Parallel Extraction: Batch DB writes (50 at a time) to avoid SQLite concurrency issues; as_completed() processes results as they arrive
+- JSON Cleanup: Use clean_markdown_from_json() to strip * and _ from outside quoted strings before JSON parsing
+- JSON Cleanup: State machine approach tracks in_quotes flag to distinguish inside/outside string content
+- Fallback Extraction: Use extract_titles_from_malformed_response() when JSON parsing fails; extracts from quoted strings and lists
+- LLM Prompts: Explicitly tell LLM "Return ONLY valid JSON. Do NOT use markdown formatting like * or _" to reduce parsing issues
 ---
 
 ## 2026-01-19 - US-001
@@ -512,4 +516,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - When adding diagnostic logging, include enough context to identify the source (e.g., post title)
   - Truncate long outputs to avoid overwhelming logs - 500 chars is a good balance
   - When adding parameters to existing functions, make them optional with default None for backwards compatibility
+---
+
+## 2026-01-20 - US-023
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Fixed JSON parsing issues and improved book title extraction prompt
+- Files modified:
+  - analyzer.py: Added clean_markdown_from_json(), extract_titles_from_malformed_response(), updated extract_books_only() prompts and parsing
+- Features:
+  - clean_markdown_from_json(): Strips markdown (* and _) from outside quoted strings using state machine approach
+  - extract_titles_from_malformed_response(): Fallback regex extraction for quoted strings and numbered/bulleted lists
+  - Updated prompts with explicit no-markdown instruction
+  - Updated prompts with full title+subtitle handling instructions
+  - Parsing logic now: (1) cleans markdown, (2) tries JSON parse, (3) falls back to regex extraction
+  - Shows "Note: Used fallback extraction" when regex fallback succeeds
+- **Learnings for future iterations:**
+  - State machine approach (tracking in_quotes flag) is robust for parsing chars inside/outside strings
+  - When cleaning JSON, preserve content inside quotes while stripping markdown outside
+  - Fallback extraction with multiple patterns (quoted strings, numbered lists, bulleted lists) increases success rate
+  - Prompts should be explicit about format requirements - "Return ONLY valid JSON. Do NOT use markdown."
+  - For title+subtitle: instruct LLM to combine if mentioned separately (common in blog posts)
 ---
