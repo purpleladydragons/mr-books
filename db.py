@@ -429,6 +429,29 @@ def get_posts_with_content():
     return posts
 
 
+def get_extraction_counts():
+    """Get counts of posts for extraction logging.
+
+    Returns:
+        Tuple: (total_with_content, already_extracted, to_process)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Total posts with content
+    cursor.execute('SELECT COUNT(*) FROM posts WHERE content_text IS NOT NULL')
+    total_with_content = cursor.fetchone()[0]
+
+    # Posts already extracted
+    cursor.execute('SELECT COUNT(*) FROM posts WHERE content_text IS NOT NULL AND books_extracted_at IS NOT NULL')
+    already_extracted = cursor.fetchone()[0]
+
+    conn.close()
+
+    to_process = total_with_content - already_extracted
+    return (total_with_content, already_extracted, to_process)
+
+
 def get_posts_for_extraction(reextract=False):
     """Get posts that need book extraction.
 

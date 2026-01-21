@@ -1180,21 +1180,17 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
                             f.cancel()
                         break
                     else:
+                        # Error occurred - do NOT mark as extracted so it gets retried next run
                         print(f"\nWarning: Error processing post '{result['post_title']}': {result['error']}")
+                        print("  (Post will be retried on next run)")
                         errors += 1
-                        # Mark post as processed anyway
-                        results_to_write.append({
-                            'post_id': result['post_id'],
-                            'book_titles': [],
-                            'full_context': None,
-                            'mark_only': True
-                        })
+                        # Do NOT add to results_to_write - leave unextracted for retry
                 else:
+                    # Success (including 0 books found) - mark as extracted
                     results_to_write.append({
                         'post_id': result['post_id'],
                         'book_titles': result['book_titles'],
-                        'full_context': result['full_context'],
-                        'mark_only': False
+                        'full_context': result['full_context']
                     })
 
             except Exception as e:
@@ -1203,12 +1199,13 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
             # Write results to DB in batches (sequential writes to avoid SQLite issues)
             if len(results_to_write) >= batch_size or completed == total or connection_failed:
                 for res in results_to_write:
-                    if not res['mark_only']:
-                        for book_title in res['book_titles']:
-                            book_id = find_or_create_book(book_title)
-                            if book_id is not None:
-                                insert_book_mention(book_id, res['post_id'], res['full_context'])
-                                total_books_found += 1
+                    # Insert book mentions
+                    for book_title in res['book_titles']:
+                        book_id = find_or_create_book(book_title)
+                        if book_id is not None:
+                            insert_book_mention(book_id, res['post_id'], res['full_context'])
+                            total_books_found += 1
+                    # Mark post as extracted (only for successful extractions)
                     mark_post_books_extracted(res['post_id'])
 
                 results_to_write = []
@@ -1223,7 +1220,7 @@ def extract_books_from_posts_llm(posts, model='llama3.2:3b', workers=5, rate_lim
     return total_books_found, errors
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False, workers=5):
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False, workers=5, reset=False):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
@@ -1231,12 +1228,13 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
         model: Ollama model to use (default: llama3.2:3b)
         reextract: If True, re-extract books from all posts (ignore cache)
         full_context: If True, use full post content with single LLM call per post (requires --use-ollama)
-        extract_only: If True, only extract book titles (no sentiment). Clears existing data first.
+        extract_only: If True, only extract book titles (no sentiment). Incremental by default.
         workers: Number of concurrent workers for LLM extraction (default: 5)
+        reset: If True (with extract_only), clear existing data and reprocess all posts
     """
     from db import (
         get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment,
-        clear_books_data, reset_extraction_cache
+        clear_books_data, reset_extraction_cache, get_extraction_counts
     )
 
     # extract_only requires use_ollama
@@ -1259,15 +1257,24 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
             print("\nAborting: Cannot proceed with --use-ollama when Ollama is not available.")
             return
 
-    # For extract_only mode, clear existing data and reset cache first
+    # For extract_only mode, only clear data if --reset flag is set
     if extract_only:
         print("\n=== EXTRACT-ONLY MODE ===")
-        print("This will clear existing books and book_mentions data for a fresh start.")
-        print("Clearing existing books data...")
-        clear_books_data()
-        print("Resetting extraction cache (posts.books_extracted_at)...")
-        reset_extraction_cache()
-        print("Data cleared. Starting fresh extraction...\n")
+        if reset:
+            print("--reset flag set: Clearing existing data for fresh start.")
+            print("Clearing existing books data...")
+            clear_books_data()
+            print("Resetting extraction cache (posts.books_extracted_at)...")
+            reset_extraction_cache()
+            print("Data cleared. Starting fresh extraction...\n")
+        else:
+            # Log skipped vs processed counts for incremental mode
+            total_with_content, already_extracted, to_process = get_extraction_counts()
+            print("Incremental mode: Only processing posts not yet extracted.")
+            print(f"  Total posts with content: {total_with_content}")
+            print(f"  Already extracted (skipping): {already_extracted}")
+            print(f"  To be processed: {to_process}")
+            print("Use --reset to clear all data and start fresh.\n")
 
     posts = get_posts_for_extraction(reextract=reextract)
     total = len(posts)

@@ -36,7 +36,8 @@ def cmd_analyze(args):
         reextract=args.reextract,
         full_context=args.full_context,
         extract_only=args.extract_only,
-        workers=args.workers
+        workers=args.workers,
+        reset=args.reset
     )
 
 
@@ -134,7 +135,12 @@ def main():
     analyze_parser.add_argument(
         '--extract-only',
         action='store_true',
-        help='Only extract book titles (no sentiment). Clears existing books data and stores full post text as context. Use Bradley-Terry ranking for sentiment.'
+        help='Only extract book titles (no sentiment). Stores full post text as context. Use Bradley-Terry ranking for sentiment. Incremental by default (skips already-extracted posts).'
+    )
+    analyze_parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Clear existing books data and reprocess all posts (use with --extract-only for fresh start)'
     )
     analyze_parser.add_argument(
         '--workers',
