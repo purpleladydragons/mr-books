@@ -57,6 +57,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Incremental Saving: On Ctrl+C, save pending comparisons and fit BT model before exit to preserve rankings
 - Tie Reduction: Use specific guidance in comparison prompts (superlatives, endorsements, criticism) to force LLM decisions
 - Tie Reduction: Log tie rate with "Tie rate: X% (N/M comparisons)" to track prompt effectiveness
+- Positional Bias: Force explicit analysis of BOTH options before deciding; prompt structure: "1. Analyze A, 2. Analyze B, 3. Compare and answer"
+- Positional Bias: Parse final answer from END of response (multiple patterns: standalone letter, "Answer: X", regex)
+- Positional Bias: Log A vs B win rate: "A vs B win rate: A=X% (n), B=Y% (m) - target: 45-55% each"
 ---
 
 ## 2026-01-19 - US-001
@@ -647,4 +650,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Smaller models may ignore "only output X" instructions - be very explicit: "Do not explain. Just output the single letter."
   - Parsing pitfall: "Based on..." starts with 'B' - don't use startswith() for parsing LLM responses
   - For Bradley-Terry rankings, even small preference signals are useful - ties waste LLM calls
+---
+
+## 2026-01-21 - US-029
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented chain-of-thought prompting to reduce positional bias in comparisons
+- Files modified:
+  - analyzer.py: Updated compare_pair_with_llm() prompt and parsing, added A vs B win rate logging, updated format_debug_output()
+  - prd.json: Marked US-029 as passing with implementation notes
+- Features:
+  - Updated comparison prompt to require explicit analysis of BOTH reviews before deciding
+  - Prompt structure: "1. Describe sentiment in A (1 sentence) 2. Describe sentiment in B (1 sentence) 3. Compare and answer: A or B"
+  - Updated parsing logic to extract final answer from END of response using multiple patterns
+  - Parsing patterns: standalone letter on last line, "Answer: X" pattern, regex for word-boundary letter at end
+  - Added 'reasoning' field to debug_info dict and format_debug_output() function
+  - Added A vs B win rate logging: "A vs B win rate: A=X% (n), B=Y% (m) - target: 45-55% each"
+  - Win rate improved from ~100% A (strong positional bias) to ~47%/53% (within target)
+  - All 10 golden tests pass
+- **Learnings for future iterations:**
+  - Simply asking for "reasoning first, then answer" doesn't work - model decides first, then rationalizes
+  - Must force EXPLICIT analysis of BOTH options separately before allowing comparison
+  - Chain-of-thought prompting: "1. Analyze A, 2. Analyze B, 3. Compare" reduces positional bias effectively
+  - Parse answer from END of response, not start - reasoning comes first now
+  - Multiple parsing patterns needed: last line check, "Answer:" pattern, regex fallback
+  - Track win rate to detect positional bias: target is 45-55% each, not 100%/0%
 ---
