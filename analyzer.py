@@ -830,7 +830,195 @@ def analyze_posts_full_context(posts, model='llama3.2:3b'):
     return total_books_found, errors
 
 
-def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False):
+def extract_books_only(post_title, post_content, model='llama3.2:3b'):
+    """Extract ONLY book titles from a post using LLM (no sentiment/reasoning).
+
+    This function asks the LLM to identify all book titles mentioned in the post,
+    returning only the titles without any sentiment analysis.
+
+    Args:
+        post_title: The title of the post (book might be mentioned here)
+        post_content: The full post content_text
+        model: The Ollama model to use (default: llama3.2:3b)
+
+    Returns:
+        List of book title strings, or empty list if:
+        - Post is empty
+        - LLM call fails
+        - JSON parsing fails
+        - In interview posts where Tyler doesn't mention any books
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    if not post_content or not post_content.strip():
+        return []
+
+    # Truncate very long posts to avoid token limits (keep first 8000 chars)
+    analysis_text = post_content[:8000] if len(post_content) > 8000 else post_content
+
+    # Detect if this is an interview/transcript
+    is_interview = is_interview_or_transcript(post_content)
+
+    if is_interview:
+        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This appears to be an interview or transcript with multiple speakers.
+
+IMPORTANT: Only extract book titles that TYLER COWEN personally mentions or comments on. Ignore book recommendations from guests or interviewees.
+
+Look for speaker tags like "TYLER:", "TYLER COWEN:", "TC:" to identify Tyler's statements.
+
+Post Title: {post_title}
+
+Post Content:
+{analysis_text}
+
+List ALL book titles mentioned in this post that Tyler Cowen mentions or comments on.
+Include books mentioned in the post title if applicable.
+
+Respond with ONLY a JSON array of book title strings.
+Example: ["The Great Gatsby", "1984", "Thinking Fast and Slow"]
+
+If no books are found or Tyler doesn't mention any books, respond with: []"""
+    else:
+        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This is a regular blog post where Tyler is the author.
+
+Post Title: {post_title}
+
+Post Content:
+{analysis_text}
+
+List ALL book titles mentioned in this post.
+Include books mentioned in the post title if applicable.
+Include any italicized titles that appear to be books.
+
+Respond with ONLY a JSON array of book title strings.
+Example: ["The Great Gatsby", "1984", "Thinking Fast and Slow"]
+
+If no books are found, respond with: []"""
+
+    # Call Ollama API
+    try:
+        url = 'http://localhost:11434/api/generate'
+        data = json.dumps({
+            'model': model,
+            'prompt': prompt,
+            'stream': False,
+            'options': {
+                'temperature': 0.1,  # Low temperature for consistent output
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            response_text = result.get('response', '').strip()
+
+            # Try to parse JSON from the response
+            # Handle cases where LLM adds extra text around the JSON
+            try:
+                # First try direct parse
+                book_titles = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Try to extract JSON array from the response
+                # Look for [...] pattern
+                match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                if match:
+                    try:
+                        book_titles = json.loads(match.group())
+                    except json.JSONDecodeError:
+                        print(f"Warning: Could not parse JSON from LLM response")
+                        return []
+                else:
+                    # No JSON array found
+                    return []
+
+            # Validate the response
+            if not isinstance(book_titles, list):
+                return []
+
+            # Filter and clean the titles
+            valid_titles = []
+            for title in book_titles:
+                if not isinstance(title, str):
+                    continue
+                title = title.strip()
+                if title and len(title) >= 3 and len(title) <= 200:
+                    valid_titles.append(title)
+
+            return valid_titles
+
+    except urllib.error.URLError as e:
+        print(f"Error: Could not connect to Ollama at localhost:11434")
+        raise ConnectionError(f"Ollama connection failed: {e}")
+    except Exception as e:
+        print(f"Error calling Ollama API: {e}")
+        return []
+
+
+def extract_books_from_posts_llm(posts, model='llama3.2:3b'):
+    """Extract books from posts using LLM (extraction only, no sentiment).
+
+    This function extracts book titles and stores full post content as context_text.
+    It does NOT compute sentiment scores - that's left for Bradley-Terry ranking.
+
+    Args:
+        posts: List of tuples (id, url, title, content_html, content_text)
+        model: Ollama model to use
+
+    Returns:
+        Tuple: (total_books_found, errors)
+    """
+    from db import find_or_create_book, insert_book_mention, mark_post_books_extracted
+
+    total = len(posts)
+    total_books_found = 0
+    errors = 0
+
+    print(f"Extracting books from {total} posts (extraction only, no sentiment)...")
+
+    for i, (post_id, url, post_title, content_html, content_text) in enumerate(posts, 1):
+        try:
+            # LLM call returns list of book title strings
+            book_titles = extract_books_only(post_title, content_text, model)
+
+            # Build full context: post title + content
+            full_context = f"{post_title}\n\n{content_text}" if post_title else content_text
+
+            for book_title in book_titles:
+                # Use fuzzy matching for deduplication
+                book_id = find_or_create_book(book_title)
+                if book_id is None:
+                    continue
+
+                # Insert book mention with full post content as context (no sentiment)
+                insert_book_mention(book_id, post_id, full_context)
+                total_books_found += 1
+
+            # Mark post as processed
+            mark_post_books_extracted(post_id)
+
+        except ConnectionError:
+            print(f"\nOllama connection failed. Stopping extraction.")
+            return total_books_found, errors
+        except Exception as e:
+            print(f"\nWarning: Error processing post '{post_title}': {e}")
+            errors += 1
+            # Mark post as processed anyway to avoid re-processing on next run
+            mark_post_books_extracted(post_id)
+
+        if i % 10 == 0 or i == total:
+            print(f"Processed {i}/{total} posts, found {total_books_found} book mentions so far")
+
+    return total_books_found, errors
+
+
+def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, full_context=False, extract_only=False):
     """Process all posts to extract books and analyze sentiment.
 
     Args:
@@ -838,8 +1026,17 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
         model: Ollama model to use (default: llama3.2:3b)
         reextract: If True, re-extract books from all posts (ignore cache)
         full_context: If True, use full post content with single LLM call per post (requires --use-ollama)
+        extract_only: If True, only extract book titles (no sentiment). Clears existing data first.
     """
-    from db import get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment
+    from db import (
+        get_posts_for_extraction, mark_post_books_extracted, update_book_sentiment,
+        clear_books_data, reset_extraction_cache
+    )
+
+    # extract_only requires use_ollama
+    if extract_only and not use_ollama:
+        print("Warning: --extract-only requires --use-ollama. Enabling Ollama mode.")
+        use_ollama = True
 
     # full_context requires use_ollama
     if full_context and not use_ollama:
@@ -856,18 +1053,39 @@ def analyze_all_posts(use_ollama=False, model='llama3.2:3b', reextract=False, fu
             print("\nAborting: Cannot proceed with --use-ollama when Ollama is not available.")
             return
 
+    # For extract_only mode, clear existing data and reset cache first
+    if extract_only:
+        print("\n=== EXTRACT-ONLY MODE ===")
+        print("This will clear existing books and book_mentions data for a fresh start.")
+        print("Clearing existing books data...")
+        clear_books_data()
+        print("Resetting extraction cache (posts.books_extracted_at)...")
+        reset_extraction_cache()
+        print("Data cleared. Starting fresh extraction...\n")
+
     posts = get_posts_for_extraction(reextract=reextract)
     total = len(posts)
 
     if total == 0:
-        if reextract:
+        if reextract or extract_only:
             print("No posts with content found. Run 'python main.py scrape' first.")
         else:
             print("No new posts to process. All posts have already had books extracted.")
             print("Use --reextract to force re-extraction from all posts.")
-        # Still run sentiment analysis and categorization for any unanalyzed mentions
+        # Still run sentiment analysis and categorization for any unanalyzed mentions (unless extract_only)
     else:
-        if reextract:
+        if extract_only:
+            print(f"Extracting books from {total} posts (extraction only, no sentiment)...")
+            # Use the new extraction-only approach
+            total_books_found, errors = extract_books_from_posts_llm(posts, model)
+            print(f"\nExtracted {total_books_found} book mentions from {total} posts.")
+            if errors > 0:
+                print(f"Encountered {errors} errors during processing.")
+            print("\nBook extraction complete. Sentiment scores will be computed via Bradley-Terry ranking.")
+            print("Run 'python main.py rank --comparisons N' to generate rankings.")
+            return  # Skip sentiment analysis and categorization for extract_only mode
+
+        elif reextract:
             print(f"Re-extracting books from {total} posts (--reextract flag set)...")
         else:
             print(f"Extracting books from {total} new posts...")

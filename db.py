@@ -975,3 +975,37 @@ def get_mentions_with_bt_scores():
     scores = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
     return scores
+
+
+def clear_books_data():
+    """Clear all books, book_mentions, and comparisons tables for fresh extraction.
+
+    This is used by --extract-only mode to start with a clean slate.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Delete in order to respect foreign key constraints
+    cursor.execute('DELETE FROM comparisons')
+    cursor.execute('DELETE FROM book_mentions')
+    cursor.execute('DELETE FROM books')
+
+    conn.commit()
+    conn.close()
+
+    print("Cleared: comparisons, book_mentions, and books tables.")
+
+
+def reset_extraction_cache():
+    """Reset posts.books_extracted_at to NULL so all posts get reprocessed.
+
+    This is used by --extract-only mode to ensure all posts are re-extracted.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE posts SET books_extracted_at = NULL')
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    print(f"Reset books_extracted_at for {affected} posts.")

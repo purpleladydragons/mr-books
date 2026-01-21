@@ -34,7 +34,8 @@ def cmd_analyze(args):
         use_ollama=args.use_ollama,
         model=args.model,
         reextract=args.reextract,
-        full_context=args.full_context
+        full_context=args.full_context,
+        extract_only=args.extract_only
     )
 
 
@@ -128,6 +129,11 @@ def main():
         '--full-context',
         action='store_true',
         help='Use full post content for LLM analysis (single LLM call per post with JSON output)'
+    )
+    analyze_parser.add_argument(
+        '--extract-only',
+        action='store_true',
+        help='Only extract book titles (no sentiment). Clears existing books data and stores full post text as context. Use Bradley-Terry ranking for sentiment.'
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 
