@@ -1,0 +1,66 @@
+[
+  {
+    "id": "extraction_001",
+    "description": "Clearly enthusiastic review with book title in post title",
+    "post_title": "*A New History of Greek Mathematics*",
+    "post_content": "I have read only about 30 pp. so far, but this is clearly one of the best science books I have read, ever.\u00a0 It is clear, always to the point, conceptual, connects advances in math to the broader history, explains the math, and full of interesting detail.\nBy Reviel Netz\n.\u00a0 Here is a brief excerpt:\nAnd this is how mathematics first emerges in the historical record: the simple, clever games accompanying the education of bureaucrats.\nOne of the best books of the year, highly recommended.",
+    "expected_books": [
+      "A New History of Greek Mathematics"
+    ],
+    "notes": "Post title contains book title, content praises it as 'one of the best science books I have read, ever'"
+  },
+  {
+    "id": "extraction_002",
+    "description": "Book with volume/subtitle in post title",
+    "post_title": "*The McCartney Legacy, volume 1, 1969-1973*",
+    "post_content": "This book is an A+ for me, though perhaps not for all of you.\u00a0 I\u2019ve already learned so much in the first fifty pages (and yes I have read the other ones), most of all just how much\nthe McCartney album\nwas a very direct outgrowth from Beatles time.\u00a0 It was much more a 1969 album and less of a 1970 album than I had realized.\u00a0 The reader also learns how every song was put together.\u00a0 Had you known that Paul regarded \u201cMan We Was Lonely\u201d as channeling Johnny Cash?\u00a0 And I hadn\u2019t understood how much Paul turned to morning alcohol (not just pot) right after the Beatles split up.\nThere is probably no book this year I will read more avidly than this one.\u00a0 Highly recommended, at least for those who care.\u00a0 You can buy it\nhere\n.\u00a0 You get almost 700 pp. from authors Allan Kozinn and Adrian Sinclair, do it!",
+    "expected_books": [
+      "The McCartney Legacy"
+    ],
+    "expected_books_fuzzy": [
+      "McCartney Legacy",
+      "The McCartney Legacy, Volume 1"
+    ],
+    "notes": "Full title is 'The McCartney Legacy, Volume 1: 1969-1973', rated A+ by Tyler"
+  },
+  {
+    "id": "extraction_003",
+    "description": "Biography with subtitle, highly recommended",
+    "post_title": "*The Man From the Future*",
+    "post_content": "That is\nthe new biography of John von Neumann\n, by Ananyo Bhattacharya, highly recommended, probably the best book about him.\u00a0 Here is one short bit:\nVon Neumann himself attributed his generation\u2019s success to \u2018a coincidence of some cultural factors\u2019 that produced \u2018a feeling of extreme insecurity in the individuals, and the necessity to produce the unusual or face extinction\u2019. In other words, their recognition that the tolerate climate of Hungary might change overnight propelled some to preternatural efforts to succeed\u2026Moreover, one could reasonably hope that good work in these fields would be fairly rewarded. The truth of general relativity was established through experiment and was not contingent on whether the person who developed the theory as Jew or Gentile.\nBy the way, a lot of those famous mathematicians thought their high school was crap.\u00a0 And here is another excerpt:\nEqually, von Neumann had no interest in sport and, barring long walks (always in a business suit), he would avoid any form of vigorous physical exercise for the rest of his life.\u00a0 When his second wife, Klari, tried to persuade him to ski, he offered her a divorce. \u2018If being married to a woman, no matter who she was, would mean he had to slide around on two pieces of wood on some slick mountainside,\u2019 she explained, \u2018he would definitely prefer to live alone and take his daily exercise, as he put it, \u201cby getting in and out of a pleasantly warm bathtub.\u201d.\nI believe my original pointer here came from Tim Harford.",
+    "expected_books": [
+      "The Man From the Future"
+    ],
+    "expected_books_fuzzy": [
+      "Man From the Future",
+      "The Man From the Future: The New Biography of John von Neumann"
+    ],
+    "notes": "Subtitle mentioned in content as 'the new biography of John von Neumann'"
+  },
+  {
+    "id": "extraction_004",
+    "description": "Book with subtitle in content body",
+    "post_title": "*The Price of Victory*",
+    "post_content": "The author is N.A.M. Rodger, and the subtitle is A Naval History of Britain, 1815-1945. \u00a0An excellent book, volume three in a longer series. \u00a0Here is one excerpt:\n\u2026the most significant of all material innovations of the nineteenth century was virtually invisible. \u00a0It took twenty-five years of investment and some heavy losses, but the completion of the first reliable transatlantic telegraph cable in 1866 may be taken to mark the moment when intercontinental communication times fell instantaneously from months to hours. \u00a0Contemporaries talked enthusiastically of the \u2018practical annihilation of time and space,\u2019 and for an imperial and naval power with more time and space to handle than anyone else, the submarine cable was truly revolutionary. \u00a0This different and expensive technology offered secure communications almost invulnerable to interference (except in shallow water). \u00a0Britain possessed most of the world\u2019s capacity to manufacture underwater cables, had an effective monopoly of Gutta percha, the only good insulator, trained the majority of the world\u2019s cable operators, owned (in 1904) more than twice as many cable-laying ships as the rest of the world put together, and alone had mastered the difficult art of recovering and repairing cables in deep water. \u00a0The high fixed costs, advanced technology and very long life (seventy-five years on average) of undersea cables made it extremely difficult for foreigners to break into this monopoly.\nI will be buying and reading other books by this author, as this is one of the very best books of this year.",
+    "expected_books": [
+      "The Price of Victory"
+    ],
+    "expected_books_fuzzy": [
+      "Price of Victory",
+      "A Naval History of Britain"
+    ],
+    "notes": "Title is 'The Price of Victory', subtitle 'A Naval History of Britain, 1815-1945' mentioned in content"
+  },
+  {
+    "id": "extraction_005",
+    "description": "Post with multiple books mentioned",
+    "post_title": "What I\u2019ve been reading",
+    "post_content": "Tirthankar Roy and K. Ravi Raman,\nKerala: 1956 to the Present\n.\u00a0 Short, nonetheless the best book I have read on why Kerala is (somewhat) special in the Indian context.\u00a0 Stresses Kerala as part of a larger set of positive South Indian developments.\u00a0 Overpriced though at $40, given the short length.\nRichard Franklin Bensel,\nYankee Leviathan: The Origins of Central State Authority in America, 1859-1877\n.\u00a0 Excellent all around, clear and conceptual from the get-go.\u00a0 In spite of the title, I find the sections on Confederate state-building most novel and illuminating.\nGlenn Adamson,\nA Century of Tomorrows: How Imagining the Future Shapes the Present\n.\u00a0 A good book on futurology and its history, note the authors considers more than tech in the narrow sense so Marcus Garvey and Marinetti are in here too.\u00a0 Sun Ra too.\nRob Young,\nElectric Eden: Unearthing Britain\u2019s Visionary Music\n.\u00a0 This book covers Fairport Convention and its many folk offshoots, and ties it in to earlier British traditions of Vaughan Williams, Bax, Holst and so on, plus traditional song and yes\nThe Wicker Man\n.\u00a0 Much of that is not to my taste, but I am prepping for Joe Boyd and figured I should read a book on it.\u00a0 This is the right book, and it is also a good way to try to understand Britain (a much written-up place) by unusual, roundabout means.\u00a0 I do by the way like Richard and Linda Thompson.\nCaroline Burt and Richard Partington,\nArise, England: Six Kings and the Making of the English State\n.\u00a0 Very good to read in conjunction with\nthe recent Helen Castor book\n.\u00a0 Burt and Partington reach earlier in time by focusing on the Edwards, but you can compare their treatments of Richard II, and that is what I am starting with here.\nAlan Walker,\nFranz Liszt: The Weimar Years, 1848-1861\n.\u00a0 Walker\u2019s three-volume biography of Liszt is one of the very best biographies, ever.\u00a0 I like it better than most of what you hear people talk about on Twitter in the way of biography.\u00a0 Soon I will start volume three, the final years when Liszt becomes an Abbe.\u00a0 You do need some familiarity with the music of Liszt to grasp these books, but it suffices to listen along while you read, you do not have to be an expert.\nThere is Tim Congdon,\nThe Quantity Theory of Money: A Restatement\n, a good introduction.",
+    "expected_books_any": [
+      "Kerala",
+      "Yankee Leviathan",
+      "A Century of Tomorrows"
+    ],
+    "notes": "Multiple books mentioned, should extract at least one. Kerala has positive review, Yankee Leviathan 'excellent all around'"
+  }
+]

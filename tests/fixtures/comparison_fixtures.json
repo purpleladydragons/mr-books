@@ -1,0 +1,92 @@
+[
+  {
+    "id": "comparison_001",
+    "description": "Enthusiastic praise vs qualified/neutral review",
+    "review_a": {
+      "book_title": "A New History of Greek Mathematics",
+      "context": "I have read only about 30 pp. so far, but this is clearly one of the best science books I have read, ever.\u00a0 It is clear, always to the point, conceptual, connects advances in math to the broader history, explains the math, and full of interesting detail.\nBy Reviel Netz\n.\u00a0 Here is a brief excerpt:\nAnd this is how mathematics first emerges in the historical record: the simple, clever games accompanying the education of bureaucrats.\nOne of the best books of the year, highly recommended.",
+      "sentiment_expected": "positive",
+      "reason": "'one of the best science books I have read, ever', 'clear, always to the point', 'highly recommended'"
+    },
+    "review_b": {
+      "book_title": "Kerala: 1956 to the Present",
+      "context": "Tirthankar Roy and K. Ravi Raman,\nKerala: 1956 to the Present\n.\u00a0 Short, nonetheless the best book I have read on why Kerala is (somewhat) special in the Indian context.\u00a0 Stresses Kerala as part of a larger set of positive South Indian developments.\u00a0 Overpriced though at $40, given the short length.\nRichard Franklin Bensel,\nYankee Leviathan: The Origins of Central State Authority in America, 1859-1877\n.\u00a0 Excellent all around, clear and conceptual from the get-go.\u00a0 In spite of the title, I find th",
+      "sentiment_expected": "neutral",
+      "reason": "'Overpriced though at $40', qualified praise 'the best book I have read' with context limiters"
+    },
+    "expected_winner": "A",
+    "notes": "Review A ('best science books I have read, ever') should clearly beat Review B ('Overpriced', qualified praise)"
+  },
+  {
+    "id": "comparison_002",
+    "description": "'Excellent book' vs 'Overpriced' review",
+    "review_a": {
+      "book_title": "The Price of Victory: A Naval History of Britain",
+      "context": "The author is N.A.M. Rodger, and the subtitle is A Naval History of Britain, 1815-1945. \u00a0An excellent book, volume three in a longer series. \u00a0Here is one excerpt:\n\u2026the most significant of all material innovations of the nineteenth century was virtually invisible. \u00a0It took twenty-five years of investment and some heavy losses, but the completion of the first reliable transatlantic telegraph cable in 1866 may be taken to mark the moment when intercontinental communication times fell instantaneously from months to hours. \u00a0Contemporaries talked enthusiastically of the \u2018practical annihilation of time and space,\u2019 and for an imperial and naval power with more time and space to handle than anyone else, the submarine cable was truly revolutionary. \u00a0This different and expensive technology offered secure communications almost invulnerable to interference (except in shallow water). \u00a0Britain possessed most of the world\u2019s capacity to manufacture underwater cables, had an effective monopoly of Gutta percha, the only good insulator, trained the majority of the world\u2019s cable operators, owned (in 1904) more than twice as many cable-laying ships as the rest of the world put together, and alone had mastered the difficult art of recovering and repairing cables in deep water. \u00a0The high fixed costs, advanced technology and very long life (seventy-five years on average) of undersea cables made it extremely difficult for foreigners to break into this monopoly.\nI will be buying and reading other books by this author, as this is one of the very best books of this year.",
+      "sentiment_expected": "positive",
+      "reason": "'An excellent book, volume three in a longer series'"
+    },
+    "review_b": {
+      "book_title": "Kerala: 1956 to the Present",
+      "context": "Tirthankar Roy and K. Ravi Raman,\nKerala: 1956 to the Present\n.\u00a0 Short, nonetheless the best book I have read on why Kerala is (somewhat) special in the Indian context.\u00a0 Stresses Kerala as part of a larger set of positive South Indian developments.\u00a0 Overpriced though at $40, given the short length.\nRichard Franklin Bensel,\nYankee Leviathan: The Origins of Central State Authority in America, 1859-1877\n.\u00a0 Excellent all around, clear and conceptual from the get-go.\u00a0 In spite of the title, I find th",
+      "sentiment_expected": "neutral",
+      "reason": "'Overpriced though at $40', qualified praise 'the best book I have read' with context limiters"
+    },
+    "expected_winner": "A",
+    "notes": "Review A ('An excellent book') should beat Review B which mentions 'Overpriced'"
+  },
+  {
+    "id": "comparison_003",
+    "description": "A+ rating vs qualified/neutral review",
+    "review_a": {
+      "book_title": "The McCartney Legacy, Volume 1: 1969-1973",
+      "context": "This book is an A+ for me, though perhaps not for all of you.\u00a0 I\u2019ve already learned so much in the first fifty pages (and yes I have read the other ones), most of all just how much\nthe McCartney album\nwas a very direct outgrowth from Beatles time.\u00a0 It was much more a 1969 album and less of a 1970 album than I had realized.\u00a0 The reader also learns how every song was put together.\u00a0 Had you known that Paul regarded \u201cMan We Was Lonely\u201d as channeling Johnny Cash?\u00a0 And I hadn\u2019t understood how much Paul turned to morning alcohol (not just pot) right after the Beatles split up.\nThere is probably no book this year I will read more avidly than this one.\u00a0 Highly recommended, at least for those who care.\u00a0 You can buy it\nhere\n.\u00a0 You get almost 700 pp. from authors Allan Kozinn and Adrian Sinclair, do it!",
+      "sentiment_expected": "very_positive",
+      "reason": "'This book is an A+ for me', enthusiasm about learning from it"
+    },
+    "review_b": {
+      "book_title": "Kerala: 1956 to the Present",
+      "context": "Tirthankar Roy and K. Ravi Raman,\nKerala: 1956 to the Present\n.\u00a0 Short, nonetheless the best book I have read on why Kerala is (somewhat) special in the Indian context.\u00a0 Stresses Kerala as part of a larger set of positive South Indian developments.\u00a0 Overpriced though at $40, given the short length.\nRichard Franklin Bensel,\nYankee Leviathan: The Origins of Central State Authority in America, 1859-1877\n.\u00a0 Excellent all around, clear and conceptual from the get-go.\u00a0 In spite of the title, I find th",
+      "sentiment_expected": "neutral",
+      "reason": "'Overpriced though at $40', qualified praise 'the best book I have read' with context limiters"
+    },
+    "expected_winner": "A",
+    "notes": "Review A (explicit 'A+' rating) should clearly beat Review B"
+  },
+  {
+    "id": "comparison_004",
+    "description": "A+ rating vs highly recommended (both positive, testing gradation)",
+    "review_a": {
+      "book_title": "The McCartney Legacy, Volume 1: 1969-1973",
+      "context": "This book is an A+ for me, though perhaps not for all of you.\u00a0 I\u2019ve already learned so much in the first fifty pages (and yes I have read the other ones), most of all just how much\nthe McCartney album\nwas a very direct outgrowth from Beatles time.\u00a0 It was much more a 1969 album and less of a 1970 album than I had realized.\u00a0 The reader also learns how every song was put together.\u00a0 Had you known that Paul regarded \u201cMan We Was Lonely\u201d as channeling Johnny Cash?\u00a0 And I hadn\u2019t understood how much Paul turned to morning alcohol (not just pot) right after the Beatles split up.\nThere is probably no book this year I will read more avidly than this one.\u00a0 Highly recommended, at least for those who care.\u00a0 You can buy it\nhere\n.\u00a0 You get almost 700 pp. from authors Allan Kozinn and Adrian Sinclair, do it!",
+      "sentiment_expected": "very_positive",
+      "reason": "'This book is an A+ for me', enthusiasm about learning from it"
+    },
+    "review_b": {
+      "book_title": "The Man From the Future",
+      "context": "That is\nthe new biography of John von Neumann\n, by Ananyo Bhattacharya, highly recommended, probably the best book about him.\u00a0 Here is one short bit:\nVon Neumann himself attributed his generation\u2019s success to \u2018a coincidence of some cultural factors\u2019 that produced \u2018a feeling of extreme insecurity in the individuals, and the necessity to produce the unusual or face extinction\u2019. In other words, their recognition that the tolerate climate of Hungary might change overnight propelled some to preternatural efforts to succeed\u2026Moreover, one could reasonably hope that good work in these fields would be fairly rewarded. The truth of general relativity was established through experiment and was not contingent on whether the person who developed the theory as Jew or Gentile.\nBy the way, a lot of those famous mathematicians thought their high school was crap.\u00a0 And here is another excerpt:\nEqually, von Neumann had no interest in sport and, barring long walks (always in a business suit), he would avoid any form of vigorous physical exercise for the rest of his life.\u00a0 When his second wife, Klari, tried to persuade him to ski, he offered her a divorce. \u2018If being married to a woman, no matter who she was, would mean he had to slide around on two pieces of wood on some slick mountainside,\u2019 she explained, \u2018he would definitely prefer to live alone and take his daily exercise, as he put it, \u201cby getting in and out of a pleasantly warm bathtub.\u201d.\nI believe my original pointer here came from Tim Harford.",
+      "sentiment_expected": "positive",
+      "reason": "'highly recommended, probably the best book about him'"
+    },
+    "expected_winner": "A_or_TIE",
+    "notes": "Both reviews are very positive. A+ rating vs 'highly recommended, probably the best'. Tie is acceptable."
+  },
+  {
+    "id": "comparison_005",
+    "description": "'Best book' vs 'excellent book' (testing close call)",
+    "review_a": {
+      "book_title": "A New History of Greek Mathematics",
+      "context": "I have read only about 30 pp. so far, but this is clearly one of the best science books I have read, ever.\u00a0 It is clear, always to the point, conceptual, connects advances in math to the broader history, explains the math, and full of interesting detail.\nBy Reviel Netz\n.\u00a0 Here is a brief excerpt:\nAnd this is how mathematics first emerges in the historical record: the simple, clever games accompanying the education of bureaucrats.\nOne of the best books of the year, highly recommended.",
+      "sentiment_expected": "positive",
+      "reason": "'one of the best science books I have read, ever', 'clear, always to the point', 'highly recommended'"
+    },
+    "review_b": {
+      "book_title": "The Price of Victory: A Naval History of Britain",
+      "context": "The author is N.A.M. Rodger, and the subtitle is A Naval History of Britain, 1815-1945. \u00a0An excellent book, volume three in a longer series. \u00a0Here is one excerpt:\n\u2026the most significant of all material innovations of the nineteenth century was virtually invisible. \u00a0It took twenty-five years of investment and some heavy losses, but the completion of the first reliable transatlantic telegraph cable in 1866 may be taken to mark the moment when intercontinental communication times fell instantaneously from months to hours. \u00a0Contemporaries talked enthusiastically of the \u2018practical annihilation of time and space,\u2019 and for an imperial and naval power with more time and space to handle than anyone else, the submarine cable was truly revolutionary. \u00a0This different and expensive technology offered secure communications almost invulnerable to interference (except in shallow water). \u00a0Britain possessed most of the world\u2019s capacity to manufacture underwater cables, had an effective monopoly of Gutta percha, the only good insulator, trained the majority of the world\u2019s cable operators, owned (in 1904) more than twice as many cable-laying ships as the rest of the world put together, and alone had mastered the difficult art of recovering and repairing cables in deep water. \u00a0The high fixed costs, advanced technology and very long life (seventy-five years on average) of undersea cables made it extremely difficult for foreigners to break into this monopoly.\nI will be buying and reading other books by this author, as this is one of the very best books of this year.",
+      "sentiment_expected": "positive",
+      "reason": "'An excellent book, volume three in a longer series'"
+    },
+    "expected_winner": "A_or_TIE",
+    "notes": "'one of the best science books I have read, ever' might beat 'An excellent book', but both are clearly positive so tie is acceptable"
+  }
+]

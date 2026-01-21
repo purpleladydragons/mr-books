@@ -7,3 +7,4 @@ cloudscraper
 rapidfuzz
 choix
 google-genai
+pytest
