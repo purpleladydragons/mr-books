@@ -48,6 +48,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - JSON Cleanup: State machine approach tracks in_quotes flag to distinguish inside/outside string content
 - Fallback Extraction: Use extract_titles_from_malformed_response() when JSON parsing fails; extracts from quoted strings and lists
 - LLM Prompts: Explicitly tell LLM "Return ONLY valid JSON. Do NOT use markdown formatting like * or _" to reduce parsing issues
+- Incremental Saving: Use save_callback param in compare_pairs_parallel() to save results every 500 comparisons
+- Incremental Saving: Handle KeyboardInterrupt with double try/except pattern: inner for futures loop, outer for final cleanup
+- Incremental Saving: On Ctrl+C, save pending comparisons and fit BT model before exit to preserve rankings
 ---
 
 ## 2026-01-19 - US-001
@@ -553,4 +556,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Success (even 0 books) = mark as processed; Error = leave unprocessed for retry
   - get_extraction_counts() returns (total_with_content, already_extracted, to_process) for logging
   - --reset flag should only clear data when explicitly requested, not by default
+---
+
+## 2026-01-21 - US-025
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented incremental saving of comparisons every 500 results
+- Added save_callback and save_interval parameters to compare_pairs_parallel()
+- Added KeyboardInterrupt handling to save pending comparisons before exit
+- Files modified:
+  - analyzer.py: Modified compare_pairs_parallel() with save_callback/save_interval params, updated run_pairwise_ranking(), _run_adaptive_ranking(), _run_topk_ranking() to use incremental saves
+- Features:
+  - Saves comparisons every 500 results with log: "Saved {n} comparisons to database ({total} total)"
+  - On Ctrl+C (KeyboardInterrupt), saves pending comparisons, fits BT model, then exits
+  - All three ranking modes (random, adaptive, top-k) now use incremental saving
+  - Existing comparisons preserved - can stop and resume without losing progress
+  - Max data loss limited to ~500 comparisons (~5 minutes of work) instead of entire batch
+- **Learnings for future iterations:**
+  - Use save_callback pattern for incremental saving in long-running parallel operations
+  - Track pending_results separately from all_results for save logic
+  - Catch KeyboardInterrupt inside as_completed loop, cancel remaining futures, then re-raise
+  - Double try/except pattern: inner for futures loop, outer for final cleanup
+  - On interruption, still fit BT model with saved data to preserve rankings
 ---
