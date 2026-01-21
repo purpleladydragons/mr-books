@@ -24,6 +24,95 @@ def get_nlp():
     return _nlp
 
 
+def clean_markdown_from_json(text):
+    """Remove markdown formatting (* and _) from outside quoted strings in JSON.
+
+    LLMs sometimes return markdown-formatted JSON like:
+    ["*Title One*", _"Title Two"_]
+
+    This function cleans up such responses to make them valid JSON.
+
+    Args:
+        text: The raw LLM response text
+
+    Returns:
+        Cleaned text with markdown removed from outside quotes
+    """
+    if not text:
+        return text
+
+    result = []
+    in_quotes = False
+    i = 0
+
+    while i < len(text):
+        char = text[i]
+
+        # Track if we're inside quoted strings
+        if char == '"' and (i == 0 or text[i-1] != '\\'):
+            in_quotes = not in_quotes
+            result.append(char)
+        elif char in '*_' and not in_quotes:
+            # Skip markdown characters outside quotes
+            pass
+        else:
+            result.append(char)
+
+        i += 1
+
+    return ''.join(result)
+
+
+def extract_titles_from_malformed_response(text):
+    """Fallback extraction of book titles from malformed LLM response.
+
+    When JSON parsing fails even after markdown cleanup, try to extract
+    titles using regex patterns. This handles cases like:
+    - ["Title One", "Title Two"] with extra text around it
+    - Numbered lists: 1. Title One\n2. Title Two
+    - Quoted strings: "Title One", "Title Two"
+    - Bulleted lists: - Title One\n- Title Two
+
+    Args:
+        text: The raw or partially cleaned LLM response
+
+    Returns:
+        List of extracted title strings, or empty list if none found
+    """
+    if not text:
+        return []
+
+    titles = []
+
+    # Try to extract quoted strings that look like book titles
+    # Match strings in double quotes that are 3-200 chars
+    quoted_pattern = r'"([^"]{3,200})"'
+    quoted_matches = re.findall(quoted_pattern, text)
+
+    for match in quoted_matches:
+        # Skip common non-title patterns
+        match = match.strip()
+        if match and not match.lower().startswith(('http', 'www.', 'the subtitle')):
+            # Skip JSON keywords and common non-titles
+            skip_words = ['true', 'false', 'null', 'example', 'book_title', 'title']
+            if match.lower() not in skip_words:
+                titles.append(match)
+
+    # If no quoted titles found, try numbered or bulleted list patterns
+    if not titles:
+        # Match lines starting with number, dash, or bullet
+        list_pattern = r'(?:^|\n)\s*(?:\d+[.)]\s*|[-•*]\s*)(.{3,200})(?:\n|$)'
+        list_matches = re.findall(list_pattern, text, re.MULTILINE)
+
+        for match in list_matches:
+            # Clean up the match
+            match = match.strip().strip('"\'')
+            if match and len(match) >= 3 and len(match) <= 200:
+                titles.append(match)
+
+    return titles
+
+
 def extract_italicized_titles(content_html):
     """Extract potential book titles from italicized text (<em> or <i> tags)."""
     if not content_html:
@@ -877,10 +966,12 @@ Post Content:
 {analysis_text}
 
 List ALL book titles mentioned in this post that Tyler Cowen mentions or comments on.
-Include books mentioned in the post title if applicable.
+Include the FULL book title with subtitle if present (e.g., "Book Title: The Subtitle").
+If the post title contains a book title and the body mentions a subtitle (e.g., "the subtitle is X"), combine them into one full title.
 
-Respond with ONLY a JSON array of book title strings.
-Example: ["The Great Gatsby", "1984", "Thinking Fast and Slow"]
+Return ONLY valid JSON. Do NOT use markdown formatting like * or _ in your response.
+Respond with a JSON array of book title strings.
+Example: ["The Great Gatsby", "Thinking Fast and Slow: Why We Make Bad Decisions"]
 
 If no books are found or Tyler doesn't mention any books, respond with: []"""
     else:
@@ -892,11 +983,13 @@ Post Content:
 {analysis_text}
 
 List ALL book titles mentioned in this post.
-Include books mentioned in the post title if applicable.
+Include the FULL book title with subtitle if present (e.g., "Book Title: The Subtitle").
+If the post title contains a book title and the body mentions a subtitle (e.g., "the subtitle is X"), combine them into one full title.
 Include any italicized titles that appear to be books.
 
-Respond with ONLY a JSON array of book title strings.
-Example: ["The Great Gatsby", "1984", "Thinking Fast and Slow"]
+Return ONLY valid JSON. Do NOT use markdown formatting like * or _ in your response.
+Respond with a JSON array of book title strings.
+Example: ["The Great Gatsby", "Thinking Fast and Slow: Why We Make Bad Decisions"]
 
 If no books are found, respond with: []"""
 
@@ -922,25 +1015,35 @@ If no books are found, respond with: []"""
             result = json.loads(response.read().decode('utf-8'))
             response_text = result.get('response', '').strip()
 
+            # Clean markdown formatting from the response before JSON parsing
+            cleaned_response = clean_markdown_from_json(response_text)
+
             # Try to parse JSON from the response
             # Handle cases where LLM adds extra text around the JSON
+            book_titles = None
             try:
-                # First try direct parse
-                book_titles = json.loads(response_text)
+                # First try direct parse on cleaned response
+                book_titles = json.loads(cleaned_response)
             except json.JSONDecodeError:
-                # Try to extract JSON array from the response
+                # Try to extract JSON array from the cleaned response
                 # Look for [...] pattern
-                match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                match = re.search(r'\[.*\]', cleaned_response, re.DOTALL)
                 if match:
                     try:
                         book_titles = json.loads(match.group())
                     except json.JSONDecodeError:
-                        title_info = f" for post: {post_title}" if post_title else ""
-                        truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
-                        print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
-                        return []
+                        pass  # Will fall through to fallback extraction
+
+            # If JSON parsing failed, try fallback regex extraction
+            if book_titles is None:
+                fallback_titles = extract_titles_from_malformed_response(response_text)
+                if fallback_titles:
+                    print(f"Note: Used fallback extraction for post: {post_title}")
+                    book_titles = fallback_titles
                 else:
-                    # No JSON array found
+                    title_info = f" for post: {post_title}" if post_title else ""
+                    truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+                    print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
                     return []
 
             # Validate the response
