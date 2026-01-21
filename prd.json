@@ -367,6 +367,24 @@
       "priority": 20,
       "passes": true,
       "notes": "Implemented extract_books_only() function that only extracts book titles without sentiment. LLM prompt includes both post title and content. Stores full post content (title + content_text) as context_text for all books from a post. Added clear_books_data() and reset_extraction_cache() functions for fresh start. Added --extract-only flag to analyze command. Interview/transcript detection still applies - only extracts books Tyler mentions. Sentiment scores come from Bradley-Terry ranking instead of extraction."
+    },
+    {
+      "id": "US-021",
+      "title": "Parallelize book extraction with multiple workers",
+      "description": "As a user, I want book extraction to run faster using parallel LLM calls.",
+      "acceptanceCriteria": [
+        "Add --workers N flag to extraction: python main.py analyze --use-ollama --extract-only --workers 5",
+        "Use ThreadPoolExecutor to process multiple posts concurrently (like scraping and ranking)",
+        "Collect results from workers, write to database sequentially in main thread (avoid SQLite concurrency issues)",
+        "Implement rate limiting across workers if needed (RateLimiter class from scraper)",
+        "Progress logging shows posts processed and books found so far",
+        "Handle LLM failures gracefully - log warning, skip post, continue with others",
+        "Default to 5 workers if --workers not specified",
+        "Script runs without errors: python main.py analyze --use-ollama --extract-only --workers 10"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": "Implemented parallel extraction using ThreadPoolExecutor with RateLimiter class. Added --workers N flag to analyze command (default 5). Workers process posts concurrently, results collected and written to DB sequentially in batches of 50 to avoid SQLite issues. Connection errors trigger graceful shutdown of remaining workers. Progress logging shows posts processed and books found. Same pattern as US-012 (parallel scraping) and US-016 (parallel comparisons)."
     }
   ]
 }

@@ -42,6 +42,8 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Extract-Only Mode: Use --extract-only with analyze to extract book titles without sentiment (stores full post as context_text)
 - Extract-Only Mode: extract_books_only() returns JSON array of title strings; use insert_book_mention() without sentiment
 - Extract-Only Mode: clear_books_data() and reset_extraction_cache() clear old data for fresh start
+- Parallel Extraction: Use --workers N flag with analyze command; extract_books_from_posts_llm() uses ThreadPoolExecutor + RateLimiter
+- Parallel Extraction: Batch DB writes (50 at a time) to avoid SQLite concurrency issues; as_completed() processes results as they arrive
 ---
 
 ## 2026-01-19 - US-001
@@ -470,4 +472,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Multiple books from same post have identical context_text - that's fine, LLM focuses on book title
   - Use insert_book_mention() (not insert_book_mention_with_sentiment()) when not storing sentiment
   - Always clear old data when doing fresh extraction to avoid stale/duplicate entries
+---
+
+## 2026-01-20 - US-021
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented parallel book extraction with configurable workers
+- Files modified:
+  - main.py: Added --workers flag to analyze command (default 5)
+  - analyzer.py: Modified extract_books_from_posts_llm() to use ThreadPoolExecutor
+- Features:
+  - ThreadPoolExecutor for parallel LLM calls (same pattern as scraping and ranking)
+  - RateLimiter class controls request rate across workers (default 5 requests/second)
+  - Results collected from workers, written to DB sequentially in batches of 50
+  - Connection errors trigger graceful shutdown of remaining workers
+  - Progress logging shows posts processed and books found (every 50 posts)
+  - Handles individual post failures gracefully (logs warning, marks processed, continues)
+  - Posts marked as processed even on error to avoid re-processing on next run
+  - Command: python main.py analyze --use-ollama --extract-only --workers 10
+- **Learnings for future iterations:**
+  - Same parallel pattern used in US-012, US-016, and now US-021: ThreadPoolExecutor + RateLimiter + sequential DB writes
+  - Batch DB writes (50 at a time) balances memory usage with write efficiency
+  - Use `as_completed()` to process results as they arrive, not in submission order
+  - Cancel remaining futures on connection error to fail fast
+  - Mark posts as processed even on error to avoid infinite retry loops
 ---
