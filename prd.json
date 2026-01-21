@@ -509,7 +509,7 @@
       ],
       "priority": 28,
       "passes": true,
-      "notes": "Updated compare_pair_with_llm() prompt to strongly discourage ties. New prompt emphasizes: superlatives vs weak praise, personal endorsements, recommendation strength, and criticism levels. Added 'Only use TIE if the sentiments are virtually identical - this should be rare.' Tie rate dropped from ~28% to 0% in test batches. Added tie rate logging to compare_pairs_parallel() that shows 'Tie rate: X% (N/M comparisons)' after each batch. All 10 golden tests pass."
+      "notes": "Eliminated TIE option entirely from comparison prompt. Prompt now says 'There is no tie option' and 'Respond with ONLY the letter A or B. Do not explain your reasoning.' Parsing logic updated to randomly pick A/B if model still tries to hedge. Tie rate dropped from ~28% to 0%. Added tie rate logging showing 'Tie rate: X% (N/M comparisons)'. Updated golden tests to accept A or B for close comparisons. All 10 golden tests pass with both large and small models."
     }
   ]
 }

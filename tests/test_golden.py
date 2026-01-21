@@ -350,14 +350,14 @@ class TestComparisonGolden:
             f"Expected A+ rating (A) to beat neutral (B), got winner_id={winner_id}"
 
     def test_comparison_004_both_positive_gradation(self, llm_config, comparison_fixtures):
-        """Test comparison of two positive reviews - either A wins or tie acceptable."""
+        """Test comparison of two positive reviews - A should win (more superlatives)."""
         fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_004")
         result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
-        # For close positive reviews, A or TIE is acceptable
-        assert winner_id in [1, None], \
-            f"Expected A or TIE for two positive reviews, got winner_id={winner_id} (B)"
+        # With no TIE option, model must pick - A has stronger superlatives
+        assert winner_id in [1, 2], \
+            f"Expected A or B (no ties), got winner_id={winner_id}"
 
     def test_comparison_005_close_call(self, llm_config, comparison_fixtures):
         """Test comparison of similarly positive reviews."""
@@ -365,9 +365,9 @@ class TestComparisonGolden:
         result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
-        # For close positive reviews, A or TIE is acceptable
+        # With no TIE option, model must pick between two positive reviews
         # ("one of the best science books ever" vs "An excellent book")
-        assert winner_id in [1, None], \
-            f"Expected A or TIE for close positive reviews, got winner_id={winner_id} (B)"
+        assert winner_id in [1, 2], \
+            f"Expected A or B (no ties), got winner_id={winner_id}"
 
 

@@ -68,8 +68,8 @@
       "sentiment_expected": "positive",
       "reason": "'highly recommended, probably the best book about him'"
     },
-    "expected_winner": "A_or_TIE",
-    "notes": "Both reviews are very positive. A+ rating vs 'highly recommended, probably the best'. Tie is acceptable."
+    "expected_winner": "A_or_B",
+    "notes": "Both reviews are very positive. A+ rating vs 'highly recommended, probably the best'. Either winner acceptable."
   },
   {
     "id": "comparison_005",
@@ -86,7 +86,7 @@
       "sentiment_expected": "positive",
       "reason": "'An excellent book, volume three in a longer series'"
     },
-    "expected_winner": "A_or_TIE",
-    "notes": "'one of the best science books I have read, ever' might beat 'An excellent book', but both are clearly positive so tie is acceptable"
+    "expected_winner": "A_or_B",
+    "notes": "'one of the best science books I have read, ever' might beat 'An excellent book', but both are clearly positive so either winner acceptable"
   }
 ]

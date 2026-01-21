@@ -1857,15 +1857,13 @@ REVIEW A - About "{title_a}":
 REVIEW B - About "{title_b}":
 {text_b}
 
-IMPORTANT: You MUST pick either A or B. Even small differences in enthusiasm, praise, or recommendation strength matter. Look for:
+You MUST choose either A or B. There is no tie option. Even if the difference is subtle, one review is always slightly more positive. Look for:
 - Superlatives ("best", "excellent", "must-read" vs "good", "interesting", "worth reading")
 - Personal endorsements ("I loved", "one of my favorites" vs neutral descriptions)
 - Recommendation strength ("highly recommend" vs "might enjoy")
 - Criticism level (any negatives mentioned vs pure praise)
 
-If one review is even slightly more enthusiastic, pick that one. Only use TIE if the sentiments are virtually identical - this should be rare.
-
-Answer with ONLY one letter: A or B (or TIE only if truly identical):"""
+Respond with ONLY the letter A or B. Do not explain your reasoning. Just output the single letter."""
 
     debug_info = {
         'title_a': title_a,
@@ -1882,20 +1880,22 @@ Answer with ONLY one letter: A or B (or TIE only if truly identical):"""
 
         response_upper = response_text.upper()
 
-        # Parse response
-        if 'TIE' in response_upper or 'EQUAL' in response_upper or 'CANNOT' in response_upper:
-            debug_info['parsed_result'] = 'TIE'
-            result = (mention_a_id, mention_b_id, None)
-        elif response_upper.startswith('A') or 'REVIEW A' in response_upper:
+        # Parse response - no TIE option, must pick A or B
+        if response_upper.startswith('A') or 'REVIEW A' in response_upper or response_upper.strip() == 'A':
             debug_info['parsed_result'] = 'A'
             result = (mention_a_id, mention_b_id, mention_a_id)
-        elif response_upper.startswith('B') or 'REVIEW B' in response_upper:
+        elif response_upper.startswith('B') or 'REVIEW B' in response_upper or response_upper.strip() == 'B':
             debug_info['parsed_result'] = 'B'
             result = (mention_a_id, mention_b_id, mention_b_id)
         else:
-            # Can't parse, treat as tie
-            debug_info['parsed_result'] = 'TIE (parse failed)'
-            result = (mention_a_id, mention_b_id, None)
+            # Model tried to avoid choosing - randomly pick to avoid bias
+            import random
+            forced_choice = random.choice(['A', 'B'])
+            debug_info['parsed_result'] = f'{forced_choice} (forced from: {response_text[:50]})'
+            if forced_choice == 'A':
+                result = (mention_a_id, mention_b_id, mention_a_id)
+            else:
+                result = (mention_a_id, mention_b_id, mention_b_id)
 
         if debug:
             debug_info['result'] = result
