@@ -64,7 +64,9 @@ def cmd_rank(args):
         model=args.model,
         workers=args.workers,
         adaptive=args.adaptive,
-        top_k=args.top_k
+        top_k=args.top_k,
+        debug=args.debug,
+        debug_log=args.debug_log
     )
 
 
@@ -188,6 +190,18 @@ def main():
         type=int,
         default=None,
         help='Focus comparisons on identifying top K items for faster convergence (e.g., --top-k 100). Refits every 500 comparisons, stops early if top-k stabilizes.'
+    )
+    rank_parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Log detailed LLM comparison info (prompts, responses). Recommend using with --workers 1 for readable output.'
+    )
+    rank_parser.add_argument(
+        '--debug-log',
+        type=str,
+        default=None,
+        metavar='FILE',
+        help='Write debug logs to a file instead of terminal (e.g., --debug-log comparisons.log)'
     )
     rank_parser.set_defaults(func=cmd_rank)
 

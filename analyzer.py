@@ -1240,17 +1240,21 @@ def compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage=5):
     }
 
 
-def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b'):
+def compare_pair_with_llm(mention_a, mention_b, model='llama3.2:3b', debug=False):
     """Ask LLM which review is more positive about its book.
 
     Args:
         mention_a: Tuple (mention_id, book_id, book_title, context_text, post_content)
         mention_b: Tuple (mention_id, book_id, book_title, context_text, post_content)
         model: Ollama model to use
+        debug: If True, return additional debug info
 
     Returns:
-        Tuple (mention_a_id, mention_b_id, winner_id)
-        winner_id is None for ties
+        If debug=False:
+            Tuple (mention_a_id, mention_b_id, winner_id)
+            winner_id is None for ties
+        If debug=True:
+            Dict with keys: result, title_a, title_b, prompt, raw_response, parsed_result, error
     """
     import json
     import urllib.request
@@ -1282,6 +1286,15 @@ Answer with ONLY one of these options:
 
 Your answer (A, B, or TIE):"""
 
+    debug_info = {
+        'title_a': title_a,
+        'title_b': title_b,
+        'prompt': prompt,
+        'raw_response': None,
+        'parsed_result': None,
+        'error': None
+    }
+
     try:
         url = 'http://localhost:11434/api/generate'
         data = json.dumps({
@@ -1300,26 +1313,44 @@ Your answer (A, B, or TIE):"""
         )
 
         with urllib.request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            response_text = result.get('response', '').strip().upper()
+            result_json = json.loads(response.read().decode('utf-8'))
+            response_text = result_json.get('response', '').strip()
+            debug_info['raw_response'] = response_text
+
+            response_upper = response_text.upper()
 
             # Parse response
-            if 'TIE' in response_text or 'EQUAL' in response_text or 'CANNOT' in response_text:
-                return (mention_a_id, mention_b_id, None)
-            elif response_text.startswith('A') or 'REVIEW A' in response_text:
-                return (mention_a_id, mention_b_id, mention_a_id)
-            elif response_text.startswith('B') or 'REVIEW B' in response_text:
-                return (mention_a_id, mention_b_id, mention_b_id)
+            if 'TIE' in response_upper or 'EQUAL' in response_upper or 'CANNOT' in response_upper:
+                debug_info['parsed_result'] = 'TIE'
+                result = (mention_a_id, mention_b_id, None)
+            elif response_upper.startswith('A') or 'REVIEW A' in response_upper:
+                debug_info['parsed_result'] = 'A'
+                result = (mention_a_id, mention_b_id, mention_a_id)
+            elif response_upper.startswith('B') or 'REVIEW B' in response_upper:
+                debug_info['parsed_result'] = 'B'
+                result = (mention_a_id, mention_b_id, mention_b_id)
             else:
                 # Can't parse, treat as tie
-                return (mention_a_id, mention_b_id, None)
+                debug_info['parsed_result'] = 'TIE (parse failed)'
+                result = (mention_a_id, mention_b_id, None)
+
+            if debug:
+                debug_info['result'] = result
+                return debug_info
+            return result
 
     except Exception as e:
-        # On error, return tie
-        return (mention_a_id, mention_b_id, None)
+        debug_info['error'] = str(e)
+        debug_info['parsed_result'] = 'TIE (error)'
+        result = (mention_a_id, mention_b_id, None)
+        if debug:
+            debug_info['result'] = result
+            return debug_info
+        return result
 
 
-def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0):
+def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0,
+                          debug=False, debug_log=None):
     """Compare pairs in parallel using ThreadPoolExecutor.
 
     Args:
@@ -1327,6 +1358,8 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
         model: Ollama model to use
         workers: Number of concurrent workers
         rate_limit: Max requests per second across all workers
+        debug: If True, log detailed comparison info
+        debug_log: File path to write debug logs (None = print to terminal)
 
     Returns:
         List of tuples (mention_a_id, mention_b_id, winner_id)
@@ -1336,6 +1369,22 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
     import time
 
     from db import get_mention_for_comparison
+
+    # Set up debug logging
+    debug_file = None
+    if debug and debug_log:
+        debug_file = open(debug_log, 'a')
+        debug_file.write(f"\n{'='*80}\n")
+        debug_file.write(f"DEBUG LOG - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        debug_file.write(f"{'='*80}\n\n")
+
+    def write_debug(text):
+        """Write debug output to file or terminal."""
+        if debug_file:
+            debug_file.write(text + '\n')
+            debug_file.flush()
+        else:
+            print(text)
 
     # Rate limiter (similar to scraper.py)
     class RateLimiter:
@@ -1353,6 +1402,8 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
                 self.last_time = time.time()
 
     rate_limiter = RateLimiter(rate_limit)
+    comparison_counter = [0]  # Use list for mutable counter in closure
+    counter_lock = threading.Lock()
 
     def compare_single(pair):
         """Worker function for comparing a single pair."""
@@ -1365,27 +1416,78 @@ def compare_pairs_parallel(pairs, model='llama3.2:3b', workers=5, rate_limit=5.0
         if not mention_a or not mention_b:
             return None
 
-        return compare_pair_with_llm(mention_a, mention_b, model)
+        return compare_pair_with_llm(mention_a, mention_b, model, debug=debug)
+
+    def format_debug_output(comparison_num, debug_info):
+        """Format debug info for output."""
+        lines = []
+        lines.append(f"\n{'-'*60}")
+        lines.append(f"COMPARISON #{comparison_num}")
+        lines.append(f"{'-'*60}")
+        lines.append(f"Book A: {debug_info['title_a']}")
+        lines.append(f"Book B: {debug_info['title_b']}")
+        lines.append("")
+        lines.append("PROMPT:")
+        lines.append("-" * 40)
+        lines.append(debug_info['prompt'])
+        lines.append("-" * 40)
+        lines.append("")
+        lines.append("RAW LLM RESPONSE:")
+        lines.append("-" * 40)
+        if debug_info['raw_response']:
+            lines.append(debug_info['raw_response'])
+        else:
+            lines.append("(no response)")
+        lines.append("-" * 40)
+        lines.append("")
+        lines.append(f"PARSED RESULT: {debug_info['parsed_result']}")
+        if debug_info['error']:
+            lines.append(f"ERROR: {debug_info['error']}")
+        lines.append(f"{'-'*60}\n")
+        return '\n'.join(lines)
 
     results = []
     total = len(pairs)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        # Submit all tasks
-        future_to_pair = {executor.submit(compare_single, pair): pair for pair in pairs}
+    if debug and workers > 1:
+        print("Note: Using --workers 1 recommended with --debug for sequential readable output.")
 
-        completed = 0
-        for future in as_completed(future_to_pair):
-            completed += 1
-            try:
-                result = future.result()
-                if result:
-                    results.append(result)
-            except Exception as e:
-                pass  # Skip failed comparisons
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            # Submit all tasks
+            future_to_pair = {executor.submit(compare_single, pair): pair for pair in pairs}
 
-            if completed % 100 == 0 or completed == total:
-                print(f"Compared {completed}/{total} pairs ({len(results)} valid)")
+            completed = 0
+            for future in as_completed(future_to_pair):
+                completed += 1
+                try:
+                    result = future.result()
+                    if result:
+                        if debug:
+                            # result is debug_info dict
+                            with counter_lock:
+                                comparison_counter[0] += 1
+                                comp_num = comparison_counter[0]
+                            write_debug(format_debug_output(comp_num, result))
+                            results.append(result['result'])
+                        else:
+                            results.append(result)
+                except Exception as e:
+                    if debug:
+                        write_debug(f"\nERROR in comparison: {e}\n")
+                    pass  # Skip failed comparisons
+
+                if not debug and (completed % 100 == 0 or completed == total):
+                    print(f"Compared {completed}/{total} pairs ({len(results)} valid)")
+
+        if debug:
+            write_debug(f"\n{'='*60}")
+            write_debug(f"SUMMARY: Completed {len(results)} valid comparisons out of {total} pairs")
+            write_debug(f"{'='*60}\n")
+
+    finally:
+        if debug_file:
+            debug_file.close()
 
     return results
 
@@ -1447,7 +1549,8 @@ def fit_bradley_terry(comparisons, mention_ids):
         return {}
 
 
-def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False, top_k=None):
+def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False, top_k=None,
+                         debug=False, debug_log=None):
     """Run pairwise comparison ranking process.
 
     Args:
@@ -1456,6 +1559,8 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         workers: Number of parallel workers
         adaptive: If True, use adaptive/uncertainty sampling with periodic refitting
         top_k: If set, focus comparisons on identifying top k items (faster convergence)
+        debug: If True, log detailed LLM comparison info
+        debug_log: File path to write debug logs (None = print to terminal)
     """
     from db import (
         get_mentions_for_bt,
@@ -1476,6 +1581,17 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
     except ConnectionError:
         print("\nAborting: Cannot proceed when Ollama is not available.")
         return
+
+    # Debug mode recommendations
+    if debug:
+        print("\n=== DEBUG MODE ENABLED ===")
+        if workers > 1:
+            print("Tip: Use --workers 1 for sequential readable output.")
+        if debug_log:
+            print(f"Debug output will be written to: {debug_log}")
+        else:
+            print("Debug output will be printed to terminal.")
+        print("")
 
     # Get all mention IDs
     mention_ids = get_mentions_for_bt()
@@ -1499,12 +1615,12 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         print(f"\n=== TOP-K FOCUSED MODE ===")
         print(f"Focusing on identifying top {top_k} items.")
         print(f"Will refit BT model every 500 comparisons and stop early if top-k stabilizes.")
-        _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k)
+        _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, debug=debug, debug_log=debug_log)
     elif adaptive:
         # Run adaptive sampling with periodic refitting
         print(f"\n=== ADAPTIVE SAMPLING MODE ===")
         print(f"Will refit BT model every 1000 comparisons to update uncertainty estimates.")
-        _run_adaptive_ranking(mention_ids, n_comparisons, model, workers)
+        _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, debug=debug, debug_log=debug_log)
     else:
         # Original random sampling approach
         print(f"Sampling {n_comparisons} pairs for comparison (random)...")
@@ -1512,7 +1628,8 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
 
         # Run comparisons in parallel
         print(f"Running pairwise comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers)
+        results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                        debug=debug, debug_log=debug_log)
 
         # Store results
         if results:
@@ -1523,7 +1640,8 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         _fit_and_update_scores(mention_ids)
 
 
-def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5):
+def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5,
+                          debug=False, debug_log=None):
     """Run adaptive ranking with periodic BT model refitting.
 
     Args:
@@ -1533,6 +1651,8 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
         workers: Number of parallel workers
         refit_interval: Refit BT model every N comparisons
         min_coverage: Minimum comparisons per item before focusing on uncertainty
+        debug: If True, log detailed LLM comparison info
+        debug_log: File path to write debug logs (None = print to terminal)
     """
     from db import (
         get_all_comparisons,
@@ -1593,7 +1713,8 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
 
         # Run comparisons
         print(f"Running comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers)
+        results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                        debug=debug, debug_log=debug_log)
 
         # Store results
         if results:
@@ -1665,7 +1786,8 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
     print(f"Run 'python main.py rankings' to see the results.")
 
 
-def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=500, stable_threshold=3):
+def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=500, stable_threshold=3,
+                      debug=False, debug_log=None):
     """Run top-k focused ranking with early stopping on stability.
 
     Args:
@@ -1676,6 +1798,8 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         top_k: Target k value (focus on identifying top k items)
         refit_interval: Refit BT model every N comparisons (default 500)
         stable_threshold: Stop early if top-k stable for this many consecutive refits (default 3)
+        debug: If True, log detailed LLM comparison info
+        debug_log: File path to write debug logs (None = print to terminal)
     """
     from db import (
         get_all_comparisons,
@@ -1733,7 +1857,8 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
 
         # Run comparisons
         print(f"Running comparisons with {workers} workers...")
-        results = compare_pairs_parallel(pairs, model=model, workers=workers)
+        results = compare_pairs_parallel(pairs, model=model, workers=workers,
+                                        debug=debug, debug_log=debug_log)
 
         # Store results
         if results:
