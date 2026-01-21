@@ -1079,6 +1079,117 @@ def _sample_uncertain_pair(scored_items):
     return candidates[-1]  # Fallback
 
 
+def sample_pairs_topk(mention_ids, n_pairs, bt_scores, top_k):
+    """Sample pairs prioritizing comparisons that help identify top-k items.
+
+    Sampling strategy:
+    - 70% of comparisons involve at least one item currently in top 2*k
+    - Within top tier: prioritize comparisons between items with similar scores (bubble at cutoff)
+    - 20% of comparisons: top item vs random item (confirm top items beat average)
+    - 10% of comparisons: pure random (discover dark horses)
+
+    Args:
+        mention_ids: List of mention IDs to sample from
+        n_pairs: Number of pairs to sample
+        bt_scores: Dict mapping mention_id to bt_score (None for unscored)
+        top_k: The target k value (focus on identifying top k items)
+
+    Returns:
+        Tuple: (pairs, stats) where pairs is List[(mention_a_id, mention_b_id)]
+               and stats is dict with sampling statistics
+    """
+    import random
+    import math
+
+    if len(mention_ids) < 2:
+        return [], {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+
+    # Get scored items and sort by score
+    scored = [(mid, bt_scores.get(mid)) for mid in mention_ids
+              if bt_scores.get(mid) is not None]
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Define top tier as top 2*k items
+    top_tier_size = min(2 * top_k, len(scored))
+    top_tier = scored[:top_tier_size] if scored else []
+    top_tier_ids = set(mid for mid, _ in top_tier)
+
+    # Items at the "bubble" - around the top-k cutoff (items ranked k-20 to k+20)
+    bubble_start = max(0, top_k - 20)
+    bubble_end = min(len(scored), top_k + 20)
+    bubble_items = scored[bubble_start:bubble_end] if scored else []
+
+    # All items not in top tier
+    non_top_ids = [mid for mid in mention_ids if mid not in top_tier_ids]
+
+    pairs = []
+    stats = {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+
+    for _ in range(n_pairs):
+        r = random.random()
+
+        # Strategy 1: 70% - Compare items within top tier (or top vs top)
+        # Prioritize items at the bubble (close to cutoff)
+        if r < 0.7 and len(top_tier) >= 2:
+            # 60% of top-tier comparisons focus on bubble items
+            if len(bubble_items) >= 2 and random.random() < 0.6:
+                # Sample from bubble with uncertainty weighting
+                i, j = random.sample(range(len(bubble_items)), 2)
+                mid_a, _ = bubble_items[i]
+                mid_b, _ = bubble_items[j]
+            else:
+                # Sample from full top tier
+                i, j = random.sample(range(len(top_tier)), 2)
+                mid_a, _ = top_tier[i]
+                mid_b, _ = top_tier[j]
+            stats['top_tier'] += 1
+
+        # Strategy 2: 20% - Top item vs random item (verify top items)
+        elif r < 0.9 and top_tier and non_top_ids:
+            mid_a, _ = random.choice(top_tier)
+            mid_b = random.choice(non_top_ids)
+            stats['top_vs_random'] += 1
+
+        # Strategy 3: 10% - Pure random (discover dark horses)
+        else:
+            mid_a, mid_b = random.sample(mention_ids, 2)
+            stats['random'] += 1
+
+        # Order pair consistently
+        if mid_a > mid_b:
+            mid_a, mid_b = mid_b, mid_a
+        pairs.append((mid_a, mid_b))
+
+    return pairs, stats
+
+
+def compute_topk_stability(old_topk, new_topk):
+    """Compute how much the top-k set changed between iterations.
+
+    Args:
+        old_topk: Set of mention IDs that were in top-k previously
+        new_topk: Set of mention IDs that are in top-k now
+
+    Returns:
+        Dict with stability metrics:
+        - overlap: Number of items in both sets
+        - changed: Number of items that entered/left the set
+        - stability_pct: Percentage of items that remained (0-100)
+    """
+    if not old_topk or not new_topk:
+        return {'overlap': 0, 'changed': 0, 'stability_pct': 0}
+
+    overlap = len(old_topk & new_topk)
+    changed = len(old_topk ^ new_topk)  # Symmetric difference
+    stability_pct = (overlap / len(new_topk)) * 100 if new_topk else 0
+
+    return {
+        'overlap': overlap,
+        'changed': changed,
+        'stability_pct': stability_pct
+    }
+
+
 def compute_uncertainty_metric(bt_scores, comparison_counts, min_coverage=5):
     """Compute overall uncertainty metric for the current ranking.
 
@@ -1336,7 +1447,7 @@ def fit_bradley_terry(comparisons, mention_ids):
         return {}
 
 
-def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False):
+def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, adaptive=False, top_k=None):
     """Run pairwise comparison ranking process.
 
     Args:
@@ -1344,6 +1455,7 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
         model: Ollama model to use
         workers: Number of parallel workers
         adaptive: If True, use adaptive/uncertainty sampling with periodic refitting
+        top_k: If set, focus comparisons on identifying top k items (faster convergence)
     """
     from db import (
         get_mentions_for_bt,
@@ -1377,7 +1489,18 @@ def run_pairwise_ranking(n_comparisons=10000, model='llama3.2:3b', workers=5, ad
     existing_count = get_comparison_count()
     print(f"Existing comparisons: {existing_count}")
 
-    if adaptive:
+    # Validate top_k value
+    if top_k is not None and top_k > len(mention_ids):
+        print(f"Warning: --top-k {top_k} exceeds total items ({len(mention_ids)}). Using all items.")
+        top_k = len(mention_ids)
+
+    if top_k is not None:
+        # Run top-k focused sampling with early stopping
+        print(f"\n=== TOP-K FOCUSED MODE ===")
+        print(f"Focusing on identifying top {top_k} items.")
+        print(f"Will refit BT model every 500 comparisons and stop early if top-k stabilizes.")
+        _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k)
+    elif adaptive:
         # Run adaptive sampling with periodic refitting
         print(f"\n=== ADAPTIVE SAMPLING MODE ===")
         print(f"Will refit BT model every 1000 comparisons to update uncertainty estimates.")
@@ -1540,6 +1663,166 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
 
     print("\nDone! Bradley-Terry ranking complete.")
     print(f"Run 'python main.py rankings' to see the results.")
+
+
+def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=500, stable_threshold=3):
+    """Run top-k focused ranking with early stopping on stability.
+
+    Args:
+        mention_ids: List of mention IDs
+        n_comparisons: Maximum number of comparisons to make
+        model: Ollama model to use
+        workers: Number of parallel workers
+        top_k: Target k value (focus on identifying top k items)
+        refit_interval: Refit BT model every N comparisons (default 500)
+        stable_threshold: Stop early if top-k stable for this many consecutive refits (default 3)
+    """
+    from db import (
+        get_all_comparisons,
+        insert_comparisons_batch,
+        update_mention_bt_scores_batch,
+        get_mentions_with_bt_scores,
+        update_book_bt_scores
+    )
+
+    total_completed = 0
+    total_stats = {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+    stability_log = []  # Track stability over time
+    consecutive_stable = 0
+
+    # Get initial BT scores
+    bt_scores = get_mentions_with_bt_scores()
+
+    # If we have existing comparisons but no BT scores, fit initial model
+    all_comparisons = get_all_comparisons()
+    if all_comparisons and not any(bt_scores.get(mid) is not None for mid in mention_ids):
+        print("Fitting initial BT model from existing comparisons...")
+        scores = fit_bradley_terry(all_comparisons, mention_ids)
+        if scores:
+            score_tuples = list(scores.items())
+            for i in range(0, len(score_tuples), 1000):
+                chunk = score_tuples[i:i+1000]
+                update_mention_bt_scores_batch(chunk)
+            bt_scores = scores
+
+    # Get initial top-k set
+    previous_topk = _get_topk_set(bt_scores, top_k)
+
+    print(f"\nInitial state:")
+    print(f"  Total items: {len(mention_ids)}")
+    print(f"  Items with scores: {sum(1 for s in bt_scores.values() if s is not None)}")
+    print(f"  Target top-k: {top_k}")
+    print(f"  Current top-tier size: {len(previous_topk)}")
+
+    while total_completed < n_comparisons:
+        # Calculate batch size (up to refit_interval or remaining)
+        batch_size = min(refit_interval, n_comparisons - total_completed)
+
+        batch_num = total_completed // refit_interval + 1
+        print(f"\n--- Batch {batch_num}: {batch_size} comparisons ---")
+
+        # Sample pairs using top-k strategy
+        pairs, batch_stats = sample_pairs_topk(mention_ids, batch_size, bt_scores, top_k)
+
+        # Update totals
+        for key in batch_stats:
+            total_stats[key] += batch_stats[key]
+
+        print(f"Sampling strategy: {batch_stats['top_tier']} top-tier, "
+              f"{batch_stats['top_vs_random']} top-vs-random, {batch_stats['random']} random")
+
+        # Run comparisons
+        print(f"Running comparisons with {workers} workers...")
+        results = compare_pairs_parallel(pairs, model=model, workers=workers)
+
+        # Store results
+        if results:
+            print(f"Storing {len(results)} comparison results...")
+            insert_comparisons_batch(results)
+
+        total_completed += batch_size
+
+        # Refit BT model
+        print("Refitting Bradley-Terry model...")
+        all_comparisons = get_all_comparisons()
+        scores = fit_bradley_terry(all_comparisons, mention_ids)
+
+        if scores:
+            # Update in-memory scores
+            bt_scores = scores
+
+            # Persist to DB
+            score_tuples = list(scores.items())
+            for i in range(0, len(score_tuples), 1000):
+                chunk = score_tuples[i:i+1000]
+                update_mention_bt_scores_batch(chunk)
+
+        # Compute top-k stability
+        current_topk = _get_topk_set(bt_scores, top_k)
+        stability = compute_topk_stability(previous_topk, current_topk)
+        stability_log.append((total_completed, stability))
+
+        print(f"Progress: {total_completed}/{n_comparisons} comparisons")
+        print(f"  Top-{top_k} stability: {stability['stability_pct']:.1f}% ({stability['overlap']}/{top_k} unchanged)")
+        if stability['changed'] > 0:
+            print(f"  Items changed: {stability['changed']}")
+
+        # Check for early stopping
+        if stability['stability_pct'] >= 100.0:
+            consecutive_stable += 1
+            print(f"  Consecutive stable refits: {consecutive_stable}/{stable_threshold}")
+            if consecutive_stable >= stable_threshold:
+                print(f"\n*** EARLY STOPPING: Top-{top_k} has been stable for {stable_threshold} consecutive refits ***")
+                break
+        else:
+            consecutive_stable = 0
+
+        # Update previous top-k for next iteration
+        previous_topk = current_topk
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("TOP-K FOCUSED SAMPLING COMPLETE")
+    print("=" * 60)
+    print(f"\nTotal comparisons made: {total_completed}")
+    if total_completed < n_comparisons:
+        print(f"(Stopped early - requested {n_comparisons})")
+    print(f"\nSampling strategy breakdown:")
+    if total_completed > 0:
+        print(f"  Top-tier comparisons: {total_stats['top_tier']} ({total_stats['top_tier']/total_completed*100:.1f}%)")
+        print(f"  Top vs random: {total_stats['top_vs_random']} ({total_stats['top_vs_random']/total_completed*100:.1f}%)")
+        print(f"  Pure random: {total_stats['random']} ({total_stats['random']/total_completed*100:.1f}%)")
+
+    # Show stability history
+    if stability_log:
+        print(f"\nTop-{top_k} stability history:")
+        for completed, stab in stability_log[-5:]:  # Show last 5
+            print(f"  After {completed} comparisons: {stab['stability_pct']:.1f}% stable")
+
+    # Aggregate to book level
+    print("\nAggregating scores to book level...")
+    update_book_bt_scores()
+
+    print(f"\nDone! Top-{top_k} ranking complete.")
+    print(f"Run 'python main.py rankings --top {top_k}' to see the results.")
+
+
+def _get_topk_set(bt_scores, k):
+    """Get the set of mention IDs in the top-k by BT score.
+
+    Args:
+        bt_scores: Dict mapping mention_id to bt_score
+        k: Number of top items to return
+
+    Returns:
+        Set of mention IDs in top-k
+    """
+    # Filter to items with scores and sort
+    scored = [(mid, score) for mid, score in bt_scores.items() if score is not None]
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Return top-k as a set
+    return set(mid for mid, _ in scored[:k])
 
 
 def _fit_and_update_scores(mention_ids):

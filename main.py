@@ -63,7 +63,8 @@ def cmd_rank(args):
         n_comparisons=args.comparisons,
         model=args.model,
         workers=args.workers,
-        adaptive=args.adaptive
+        adaptive=args.adaptive,
+        top_k=args.top_k
     )
 
 
@@ -181,6 +182,12 @@ def main():
         '--adaptive',
         action='store_true',
         help='Use adaptive/uncertainty sampling (focuses on uncertain rankings, refits model every 1000 comparisons)'
+    )
+    rank_parser.add_argument(
+        '--top-k',
+        type=int,
+        default=None,
+        help='Focus comparisons on identifying top K items for faster convergence (e.g., --top-k 100). Refits every 500 comparisons, stops early if top-k stabilizes.'
     )
     rank_parser.set_defaults(func=cmd_rank)
 
