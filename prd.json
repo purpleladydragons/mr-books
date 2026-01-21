@@ -305,6 +305,26 @@
       "priority": 17,
       "passes": true,
       "notes": "Implemented sample_pairs_adaptive() with three-tier sampling strategy: (1) coverage-focused sampling for items with < 5 comparisons (60% probability), (2) uncertainty-focused sampling using exponential weighting on score differences (80% of remaining), and (3) random fallback. Uses _sample_uncertain_pair() for weighted sampling based on inverse score differences. compute_uncertainty_metric() tracks overall ranking uncertainty. _run_adaptive_ranking() handles periodic BT model refitting every 1000 comparisons and logs uncertainty reduction metrics. Added --adaptive flag to rank command in main.py."
+    },
+    {
+      "id": "US-018",
+      "title": "Implement top-k focused sampling for faster convergence on top rankings",
+      "description": "As a user, I want to identify Tyler's top-rated books quickly without wasting comparisons on low-ranked items.",
+      "acceptanceCriteria": [
+        "Create sample_pairs_topk() function that prioritizes comparisons involving high-scoring items",
+        "Add --top-k N flag to rank command to focus on identifying top N items (e.g., --top-k 100)",
+        "Sampling strategy: 70% of comparisons involve at least one item currently in top 2*k (e.g., top 200 for --top-k 100)",
+        "Within top tier: prioritize comparisons between items with similar scores (the 'bubble' at the cutoff)",
+        "20% of comparisons: top item vs random item (confirm top items actually beat average items)",
+        "10% of comparisons: pure random (discover dark horses that might belong in top)",
+        "Re-fit BT model every 500 comparisons to update which items are 'top tier'",
+        "Track and log 'top-k stability': how much the top-k set changed since last refit",
+        "Stop early if top-k is stable for 3 consecutive refits (convergence detected)",
+        "Script runs without errors: python main.py rank --comparisons 20000 --top-k 100 --workers 5"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Implemented sample_pairs_topk() with three-tier sampling strategy: (1) 70% top-tier comparisons with 60% focused on 'bubble' items around the cutoff, (2) 20% top vs random to verify top items, (3) 10% pure random to discover dark horses. Added compute_topk_stability() to track how much the top-k set changes between refits. _run_topk_ranking() handles periodic BT model refitting every 500 comparisons and implements early stopping after 3 consecutive stable refits (100% stability). Added --top-k flag to rank command in main.py."
     }
   ]
 }

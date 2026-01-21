@@ -34,6 +34,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Bradley-Terry: rankings command auto-detects and uses bt_score when available via has_bt_scores()
 - Bradley-Terry (Adaptive): Use --adaptive flag for uncertainty-based sampling; refits model every 1000 comparisons
 - Bradley-Terry (Adaptive): sample_pairs_adaptive() uses three-tier strategy: coverage → uncertainty → random
+- Bradley-Terry (Top-k): Use --top-k N flag to focus on identifying top N items; refits every 500 comparisons
+- Bradley-Terry (Top-k): sample_pairs_topk() uses 70% top-tier, 20% top-vs-random, 10% random; prioritizes "bubble" items
+- Bradley-Terry (Top-k): Early stopping after 3 consecutive stable refits (100% stability in top-k set)
 ---
 
 ## 2026-01-19 - US-001
@@ -386,4 +389,29 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Sampling 50 candidates for uncertainty pairs is a good balance between quality and speed
   - Periodic refitting (every 1000 comparisons) keeps uncertainty estimates fresh without too much overhead
   - Tracking uncertainty reduction per 1000 comparisons gives good efficiency metrics
+---
+
+## 2026-01-20 - US-018
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented top-k focused sampling for faster convergence on top rankings
+- Files modified:
+  - analyzer.py: Added sample_pairs_topk(), compute_topk_stability(), _run_topk_ranking(), _get_topk_set()
+  - main.py: Added --top-k flag to rank command, updated cmd_rank() to pass top_k parameter
+- Features:
+  - sample_pairs_topk(): Three-tier sampling strategy focusing on identifying top-k items
+    - 70% top-tier comparisons (comparing items in top 2*k)
+    - 60% of top-tier focused on "bubble" items around the cutoff (k-20 to k+20)
+    - 20% top vs random (verify top items beat average items)
+    - 10% pure random (discover dark horses)
+  - compute_topk_stability(): Tracks how much the top-k set changed since last refit
+  - _run_topk_ranking(): Refits BT model every 500 comparisons (vs 1000 for adaptive)
+  - Early stopping: Stops if top-k is 100% stable for 3 consecutive refits
+  - Logs top-k stability history and convergence progress
+  - --top-k flag added to 'python main.py rank' command
+- **Learnings for future iterations:**
+  - "Bubble" items (around the k cutoff) are the most important to compare - they determine who's in/out
+  - 70/20/10 split gives good balance: most effort on top items, some verification, some exploration
+  - Refitting every 500 (not 1000) makes sense for top-k since the focus is narrower
+  - Early stopping on stability can save significant compute when top-k converges
+  - _get_topk_set() helper is useful for comparing sets across iterations
 ---
