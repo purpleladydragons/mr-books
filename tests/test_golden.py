@@ -9,6 +9,7 @@ Usage:
     pytest tests/test_golden.py -v --provider=gemini --api-key=YOUR_KEY
     pytest tests/test_golden.py -v -k extraction  # Run only extraction tests
     pytest tests/test_golden.py -v -k comparison  # Run only comparison tests
+    pytest tests/test_golden.py -v --verbose-llm  # Show LLM inputs/outputs
 """
 
 import json
@@ -41,12 +42,55 @@ def llm_config(request):
     provider = request.config.getoption("--provider")
     api_key = request.config.getoption("--api-key") or os.environ.get("GEMINI_API_KEY")
     model = request.config.getoption("--model")
+    verbose = request.config.getoption("--verbose-llm")
 
     return {
         "provider": provider,
         "api_key": api_key,
-        "model": model
+        "model": model,
+        "verbose": verbose
     }
+
+
+def log_extraction(fixture, result, verbose):
+    """Log extraction test inputs and outputs."""
+    if not verbose:
+        return
+
+    print("\n" + "=" * 70)
+    print(f"EXTRACTION TEST: {fixture['id']}")
+    print(f"Description: {fixture['description']}")
+    print("-" * 70)
+    print(f"POST TITLE: {fixture['post_title']}")
+    print(f"POST CONTENT ({len(fixture['post_content'])} chars):")
+    print(fixture['post_content'][:500] + ("..." if len(fixture['post_content']) > 500 else ""))
+    print("-" * 70)
+    print(f"EXPECTED: {fixture.get('expected_books', fixture.get('expected_books_any', []))}")
+    print(f"LLM OUTPUT: {result}")
+    print("=" * 70)
+
+
+def log_comparison(fixture, debug_info, verbose):
+    """Log comparison test inputs and outputs."""
+    if not verbose:
+        return
+
+    print("\n" + "=" * 70)
+    print(f"COMPARISON TEST: {fixture['id']}")
+    print(f"Description: {fixture['description']}")
+    print("-" * 70)
+    print(f"REVIEW A - {debug_info['title_a']}:")
+    context_a = fixture['review_a']['context']
+    print(context_a[:400] + ("..." if len(context_a) > 400 else ""))
+    print()
+    print(f"REVIEW B - {debug_info['title_b']}:")
+    context_b = fixture['review_b']['context']
+    print(context_b[:400] + ("..." if len(context_b) > 400 else ""))
+    print("-" * 70)
+    print(f"EXPECTED WINNER: {fixture['expected_winner']}")
+    print(f"RAW LLM RESPONSE: {debug_info.get('raw_response', 'N/A')}")
+    print(f"PARSED RESULT: {debug_info.get('parsed_result', 'N/A')}")
+    print("=" * 70)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -127,6 +171,8 @@ class TestExtractionGolden:
             api_key=llm_config["api_key"]
         )
 
+        log_extraction(fixture, result, llm_config["verbose"])
+
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) >= 1, f"Expected at least 1 book, got {len(result)}: {result}"
 
@@ -146,6 +192,8 @@ class TestExtractionGolden:
             model=llm_config["model"],
             api_key=llm_config["api_key"]
         )
+
+        log_extraction(fixture, result, llm_config["verbose"])
 
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) >= 1, f"Expected at least 1 book, got {len(result)}: {result}"
@@ -167,6 +215,8 @@ class TestExtractionGolden:
             api_key=llm_config["api_key"]
         )
 
+        log_extraction(fixture, result, llm_config["verbose"])
+
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) >= 1, f"Expected at least 1 book, got {len(result)}: {result}"
 
@@ -186,6 +236,8 @@ class TestExtractionGolden:
             api_key=llm_config["api_key"]
         )
 
+        log_extraction(fixture, result, llm_config["verbose"])
+
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) >= 1, f"Expected at least 1 book, got {len(result)}: {result}"
 
@@ -204,6 +256,8 @@ class TestExtractionGolden:
             model=llm_config["model"],
             api_key=llm_config["api_key"]
         )
+
+        log_extraction(fixture, result, llm_config["verbose"])
 
         assert isinstance(result, list), f"Expected list, got {type(result)}"
         assert len(result) >= 1, f"Expected at least 1 book for multi-book post, got {len(result)}: {result}"
@@ -239,20 +293,30 @@ class TestComparisonGolden:
             review["context"]  # Use context as post_content too
         )
 
-    def test_comparison_001_enthusiastic_vs_neutral(self, llm_config, comparison_fixtures):
-        """Test that enthusiastic praise beats qualified/neutral review."""
-        fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_001")
-
+    def _run_comparison(self, fixture, llm_config):
+        """Run a comparison test and return result with optional logging."""
         mention_a = self._make_mention_tuple(fixture["review_a"], mention_id=1)
         mention_b = self._make_mention_tuple(fixture["review_b"], mention_id=2)
 
-        result = compare_pair_with_llm(
+        # Always use debug=True to get detailed info for logging
+        debug_info = compare_pair_with_llm(
             mention_a=mention_a,
             mention_b=mention_b,
             provider=llm_config["provider"],
             model=llm_config["model"],
-            api_key=llm_config["api_key"]
+            api_key=llm_config["api_key"],
+            debug=True
         )
+
+        log_comparison(fixture, debug_info, llm_config["verbose"])
+
+        # Extract result tuple from debug info
+        return debug_info["result"]
+
+    def test_comparison_001_enthusiastic_vs_neutral(self, llm_config, comparison_fixtures):
+        """Test that enthusiastic praise beats qualified/neutral review."""
+        fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_001")
+        result = self._run_comparison(fixture, llm_config)
 
         # Result is (mention_a_id, mention_b_id, winner_id)
         assert len(result) == 3, f"Expected 3-tuple, got {result}"
@@ -270,17 +334,7 @@ class TestComparisonGolden:
     def test_comparison_002_excellent_vs_overpriced(self, llm_config, comparison_fixtures):
         """Test that 'excellent book' beats 'overpriced' review."""
         fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_002")
-
-        mention_a = self._make_mention_tuple(fixture["review_a"], mention_id=1)
-        mention_b = self._make_mention_tuple(fixture["review_b"], mention_id=2)
-
-        result = compare_pair_with_llm(
-            mention_a=mention_a,
-            mention_b=mention_b,
-            provider=llm_config["provider"],
-            model=llm_config["model"],
-            api_key=llm_config["api_key"]
-        )
+        result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
         assert winner_id == 1, \
@@ -289,17 +343,7 @@ class TestComparisonGolden:
     def test_comparison_003_aplus_vs_neutral(self, llm_config, comparison_fixtures):
         """Test that A+ rating clearly beats neutral review."""
         fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_003")
-
-        mention_a = self._make_mention_tuple(fixture["review_a"], mention_id=1)
-        mention_b = self._make_mention_tuple(fixture["review_b"], mention_id=2)
-
-        result = compare_pair_with_llm(
-            mention_a=mention_a,
-            mention_b=mention_b,
-            provider=llm_config["provider"],
-            model=llm_config["model"],
-            api_key=llm_config["api_key"]
-        )
+        result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
         assert winner_id == 1, \
@@ -308,17 +352,7 @@ class TestComparisonGolden:
     def test_comparison_004_both_positive_gradation(self, llm_config, comparison_fixtures):
         """Test comparison of two positive reviews - either A wins or tie acceptable."""
         fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_004")
-
-        mention_a = self._make_mention_tuple(fixture["review_a"], mention_id=1)
-        mention_b = self._make_mention_tuple(fixture["review_b"], mention_id=2)
-
-        result = compare_pair_with_llm(
-            mention_a=mention_a,
-            mention_b=mention_b,
-            provider=llm_config["provider"],
-            model=llm_config["model"],
-            api_key=llm_config["api_key"]
-        )
+        result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
         # For close positive reviews, A or TIE is acceptable
@@ -328,17 +362,7 @@ class TestComparisonGolden:
     def test_comparison_005_close_call(self, llm_config, comparison_fixtures):
         """Test comparison of similarly positive reviews."""
         fixture = next(f for f in comparison_fixtures if f["id"] == "comparison_005")
-
-        mention_a = self._make_mention_tuple(fixture["review_a"], mention_id=1)
-        mention_b = self._make_mention_tuple(fixture["review_b"], mention_id=2)
-
-        result = compare_pair_with_llm(
-            mention_a=mention_a,
-            mention_b=mention_b,
-            provider=llm_config["provider"],
-            model=llm_config["model"],
-            api_key=llm_config["api_key"]
-        )
+        result = self._run_comparison(fixture, llm_config)
 
         winner_id = result[2]
         # For close positive reviews, A or TIE is acceptable

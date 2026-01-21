@@ -26,6 +26,12 @@ def pytest_addoption(parser):
         default=None,
         help="Model to use (defaults based on provider)"
     )
+    parser.addoption(
+        "--verbose-llm",
+        action="store_true",
+        default=False,
+        help="Show LLM inputs and outputs for each test"
+    )
 
 
 def pytest_configure(config):
