@@ -493,6 +493,23 @@
       "priority": 27,
       "passes": true,
       "notes": "Created test_golden.py with 5 extraction tests and 5 comparison tests. Fixtures use real posts from database. Tests call actual LLM (Ollama or Gemini via --provider flag). Tests verify: book title extraction from post titles, subtitles, multi-book posts; and sentiment comparisons with clear positive/neutral differences. All 10 tests pass with Ollama."
+    },
+    {
+      "id": "US-028",
+      "title": "Reduce tie rate by making comparison prompt more opinionated",
+      "description": "As a user, I want the model to pick a winner more often instead of defaulting to TIE.",
+      "acceptanceCriteria": [
+        "Update comparison prompt to discourage ties: 'You MUST pick A or B. Only use TIE if the sentiments are virtually identical.'",
+        "Add language like: 'Even small differences matter - if one review is slightly more enthusiastic, pick that one.'",
+        "Consider removing TIE as an option entirely, or making it require justification",
+        "Track tie rate before/after change (log: 'Tie rate: X%')",
+        "Target tie rate: under 10% (currently ~28%)",
+        "Run golden tests to ensure changes don't break comparison accuracy",
+        "Script runs without errors"
+      ],
+      "priority": 28,
+      "passes": true,
+      "notes": "Updated compare_pair_with_llm() prompt to strongly discourage ties. New prompt emphasizes: superlatives vs weak praise, personal endorsements, recommendation strength, and criticism levels. Added 'Only use TIE if the sentiments are virtually identical - this should be rare.' Tie rate dropped from ~28% to 0% in test batches. Added tie rate logging to compare_pairs_parallel() that shows 'Tie rate: X% (N/M comparisons)' after each batch. All 10 golden tests pass."
     }
   ]
 }

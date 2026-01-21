@@ -1857,12 +1857,15 @@ REVIEW A - About "{title_a}":
 REVIEW B - About "{title_b}":
 {text_b}
 
-Answer with ONLY one of these options:
-- "A" if Review A is more positive about its book
-- "B" if Review B is more positive about its book
-- "TIE" if they are equally positive or you cannot determine
+IMPORTANT: You MUST pick either A or B. Even small differences in enthusiasm, praise, or recommendation strength matter. Look for:
+- Superlatives ("best", "excellent", "must-read" vs "good", "interesting", "worth reading")
+- Personal endorsements ("I loved", "one of my favorites" vs neutral descriptions)
+- Recommendation strength ("highly recommend" vs "might enjoy")
+- Criticism level (any negatives mentioned vs pure praise)
 
-Your answer (A, B, or TIE):"""
+If one review is even slightly more enthusiastic, pick that one. Only use TIE if the sentiments are virtually identical - this should be rare.
+
+Answer with ONLY one letter: A or B (or TIE only if truly identical):"""
 
     debug_info = {
         'title_a': title_a,
@@ -2076,9 +2079,19 @@ def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
         if pending_results:
             save_pending()
 
+        # Calculate and log tie rate
+        if all_results:
+            tie_count = sum(1 for r in all_results if r[2] is None)
+            tie_rate = (tie_count / len(all_results)) * 100
+            print(f"Tie rate: {tie_rate:.1f}% ({tie_count}/{len(all_results)} comparisons)")
+
         if debug:
             write_debug(f"\n{'='*60}")
             write_debug(f"SUMMARY: Completed {len(all_results)} valid comparisons out of {total} pairs")
+            if all_results:
+                tie_count = sum(1 for r in all_results if r[2] is None)
+                tie_rate = (tie_count / len(all_results)) * 100
+                write_debug(f"Tie rate: {tie_rate:.1f}% ({tie_count}/{len(all_results)} comparisons)")
             write_debug(f"{'='*60}\n")
 
     except KeyboardInterrupt:
