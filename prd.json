@@ -547,6 +547,21 @@
       "priority": 30,
       "passes": true,
       "notes": "Changed sample_pairs_topk() to use 80% top-vs-random, 20% pure random (removed top-vs-top comparisons entirely). Added get_win_rates_vs_random() in db.py to compute win rates against random opponents. Updated _run_topk_ranking() to log tier movement (items in/out) and win rate metrics (avg, min, low/high confidence item counts). Early stopping based on tier membership stability was already implemented from US-018."
+    },
+    {
+      "id": "US-031",
+      "title": "Fix hardcoded 'Ollama connection failed' error message for Gemini",
+      "description": "As a user, I want accurate error messages that show the actual provider and error, not hardcoded Ollama text.",
+      "acceptanceCriteria": [
+        "Remove hardcoded 'Ollama connection failed' message from extraction loop (analyzer.py line ~1342)",
+        "Display the actual error message from the ConnectionError (e.g., 'Gemini API error: ...')",
+        "Error message should be provider-agnostic: 'LLM connection failed: {actual error}'",
+        "Apply same fix to any other places that have hardcoded 'Ollama' error messages",
+        "Script runs without errors: python main.py analyze --extract-only --provider gemini"
+      ],
+      "priority": 31,
+      "passes": true,
+      "notes": "Changed error messages from hardcoded 'Ollama connection failed' to provider-agnostic 'LLM connection failed: {actual error}' in three locations: analyze_book_mentions() line 894, analyze_posts_full_context() line 1069, and extract_books_from_posts_llm() line 1317. Error messages now display the actual exception message which includes provider-specific details."
     }
   ]
 }

@@ -698,3 +698,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Removed 'top_tier' from stats dict since that sampling strategy was eliminated
   - The 80/20 split provides good balance between validation (80%) and discovery (20%)
 ---
+
+## 2026-01-22 - US-031
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Fixed hardcoded 'Ollama connection failed' error messages to be provider-agnostic
+- Files modified:
+  - analyzer.py: Changed 3 error message locations to use actual exception message
+- Locations fixed:
+  - analyze_book_mentions() line 894: `ConnectionError as e` + `LLM connection failed: {e}`
+  - analyze_posts_full_context() line 1069: Same pattern
+  - extract_books_from_posts_llm() line 1317: Extracts error from result dict
+- Error messages now show actual provider/error details like "Gemini API key not provided" or "Ollama connection failed: Connection refused"
+- **Learnings for future iterations:**
+  - When catching exceptions for error messages, always capture `as e` to access the message
+  - Provider-agnostic patterns: use "LLM connection failed" not "Ollama connection failed"
+  - For worker results that encode errors as strings, extract meaningful part with replace()
+---
