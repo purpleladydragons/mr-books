@@ -562,6 +562,37 @@
       "priority": 31,
       "passes": true,
       "notes": "Changed error messages from hardcoded 'Ollama connection failed' to provider-agnostic 'LLM connection failed: {actual error}' in three locations: analyze_book_mentions() line 894, analyze_posts_full_context() line 1069, and extract_books_from_posts_llm() line 1317. Error messages now display the actual exception message which includes provider-specific details."
+    },
+    {
+      "id": "US-032",
+      "title": "Retry on 503 server overload errors for Gemini API",
+      "description": "As a user, I want transient 503 errors to be retried automatically instead of failing immediately.",
+      "acceptanceCriteria": [
+        "Add 503, 'overload', and 'unavailable' to retry condition in call_gemini()",
+        "Increase max_retries from 3 to 5 for more resilience",
+        "Use exponential backoff (2, 4, 8, 16, 32 seconds) for retries",
+        "Change log message from 'Rate limit hit' to 'Transient error' since it covers multiple error types",
+        "Script continues extraction even when Gemini servers are temporarily overloaded"
+      ],
+      "priority": 32,
+      "passes": true,
+      "notes": "Added '503', 'overload', 'unavailable' to retry condition. Increased max_retries to 5 (total backoff: 62 seconds). Changed log message to 'Transient error, waiting Xs before retry...'."
+    },
+    {
+      "id": "US-033",
+      "title": "Remove fallback regex extraction for malformed LLM responses",
+      "description": "As a user, I want failed JSON parsing to skip the post rather than use unreliable regex fallback.",
+      "acceptanceCriteria": [
+        "Remove extract_titles_from_malformed_response() function from analyzer.py",
+        "Remove fallback extraction logic from extract_books_only()",
+        "When JSON parsing fails: log warning with post title and truncated response, return empty list",
+        "Post will NOT be marked as extracted (books_extracted_at stays NULL) so it gets retried on next run",
+        "Remove 'Note: Used fallback extraction for post' log message",
+        "Script runs without errors"
+      ],
+      "priority": 33,
+      "passes": true,
+      "notes": "Removed extract_titles_from_malformed_response() function entirely. Updated extract_books_only() to just log warning and return empty list when JSON parsing fails. Post stays unextracted (books_extracted_at NULL) so it gets retried on next run. Updated Codebase Patterns in progress.txt to reflect new behavior."
     }
   ]
 }

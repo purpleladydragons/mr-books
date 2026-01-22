@@ -63,56 +63,6 @@ def clean_markdown_from_json(text):
     return ''.join(result)
 
 
-def extract_titles_from_malformed_response(text):
-    """Fallback extraction of book titles from malformed LLM response.
-
-    When JSON parsing fails even after markdown cleanup, try to extract
-    titles using regex patterns. This handles cases like:
-    - ["Title One", "Title Two"] with extra text around it
-    - Numbered lists: 1. Title One\n2. Title Two
-    - Quoted strings: "Title One", "Title Two"
-    - Bulleted lists: - Title One\n- Title Two
-
-    Args:
-        text: The raw or partially cleaned LLM response
-
-    Returns:
-        List of extracted title strings, or empty list if none found
-    """
-    if not text:
-        return []
-
-    titles = []
-
-    # Try to extract quoted strings that look like book titles
-    # Match strings in double quotes that are 3-200 chars
-    quoted_pattern = r'"([^"]{3,200})"'
-    quoted_matches = re.findall(quoted_pattern, text)
-
-    for match in quoted_matches:
-        # Skip common non-title patterns
-        match = match.strip()
-        if match and not match.lower().startswith(('http', 'www.', 'the subtitle')):
-            # Skip JSON keywords and common non-titles
-            skip_words = ['true', 'false', 'null', 'example', 'book_title', 'title']
-            if match.lower() not in skip_words:
-                titles.append(match)
-
-    # If no quoted titles found, try numbered or bulleted list patterns
-    if not titles:
-        # Match lines starting with number, dash, or bullet
-        list_pattern = r'(?:^|\n)\s*(?:\d+[.)]\s*|[-•*]\s*)(.{3,200})(?:\n|$)'
-        list_matches = re.findall(list_pattern, text, re.MULTILINE)
-
-        for match in list_matches:
-            # Clean up the match
-            match = match.strip().strip('"\'')
-            if match and len(match) >= 3 and len(match) <= 200:
-                titles.append(match)
-
-    return titles
-
-
 def extract_italicized_titles(content_html):
     """Extract potential book titles from italicized text (<em> or <i> tags)."""
     if not content_html:
@@ -541,7 +491,7 @@ def call_ollama(prompt, model='llama3.2:3b', temperature=0.1, timeout=120):
         raise ConnectionError(f"Ollama connection failed: {e}")
 
 
-def call_gemini(prompt, model='gemini-2.5-flash', api_key=None, temperature=0.1, timeout=120, max_retries=3):
+def call_gemini(prompt, model='gemini-2.5-flash', api_key=None, temperature=0.1, timeout=120, max_retries=5):
     """Call Gemini API with a prompt.
 
     Args:
@@ -590,11 +540,11 @@ def call_gemini(prompt, model='gemini-2.5-flash', api_key=None, temperature=0.1,
             return response.text.strip()
         except Exception as e:
             error_str = str(e).lower()
-            # Check for rate limit errors
-            if 'rate' in error_str or '429' in error_str or 'quota' in error_str:
+            # Check for rate limit or transient server errors (429, 503, overloaded)
+            if 'rate' in error_str or '429' in error_str or 'quota' in error_str or '503' in error_str or 'overload' in error_str or 'unavailable' in error_str:
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
-                    print(f"Rate limit hit, waiting {wait_time}s before retry...")
+                    print(f"Transient error, waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                     continue
             raise ConnectionError(f"Gemini API error: {e}")
@@ -1175,17 +1125,12 @@ If no books are found, respond with: []"""
                 except json.JSONDecodeError:
                     pass  # Will fall through to fallback extraction
 
-        # If JSON parsing failed, try fallback regex extraction
+        # If JSON parsing failed, log warning and return empty list (post will be retried)
         if book_titles is None:
-            fallback_titles = extract_titles_from_malformed_response(response_text)
-            if fallback_titles:
-                print(f"Note: Used fallback extraction for post: {post_title}")
-                book_titles = fallback_titles
-            else:
-                title_info = f" for post: {post_title}" if post_title else ""
-                truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
-                print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
-                return []
+            title_info = f" for post: {post_title}" if post_title else ""
+            truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
+            print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
+            return []
 
         # Validate the response
         if not isinstance(book_titles, list):

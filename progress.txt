@@ -47,7 +47,7 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Parallel Extraction: Batch DB writes (50 at a time) to avoid SQLite concurrency issues; as_completed() processes results as they arrive
 - JSON Cleanup: Use clean_markdown_from_json() to strip * and _ from outside quoted strings before JSON parsing
 - JSON Cleanup: State machine approach tracks in_quotes flag to distinguish inside/outside string content
-- Fallback Extraction: Use extract_titles_from_malformed_response() when JSON parsing fails; extracts from quoted strings and lists
+- JSON Parse Failure: When JSON parsing fails, log warning and return empty list; post not marked as extracted so it gets retried
 - LLM Prompts: Explicitly tell LLM "Return ONLY valid JSON. Do NOT use markdown formatting like * or _" to reduce parsing issues
 - LLM Provider: Use google-genai package for Gemini (NOT deprecated google-generativeai)
 - LLM Provider: API pattern: `from google import genai; client = genai.Client(api_key=...); client.models.generate_content(model=..., contents=...)`
@@ -713,4 +713,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - When catching exceptions for error messages, always capture `as e` to access the message
   - Provider-agnostic patterns: use "LLM connection failed" not "Ollama connection failed"
   - For worker results that encode errors as strings, extract meaningful part with replace()
+---
+
+## 2026-01-22 - US-033
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Removed fallback regex extraction for malformed LLM responses
+- Files modified:
+  - analyzer.py: Removed extract_titles_from_malformed_response() function (~50 lines), simplified extract_books_only() error handling
+  - progress.txt: Updated Codebase Patterns to reflect new behavior
+- Changes:
+  - Deleted extract_titles_from_malformed_response() function (lines 66-113)
+  - Removed fallback extraction call in extract_books_only() (lines 1128-1138)
+  - When JSON parsing fails: logs warning with post title and truncated response, returns empty list
+  - Post stays unextracted (books_extracted_at NULL) so it gets retried on next run
+  - Removed "Note: Used fallback extraction for post" log message
+- **Learnings for future iterations:**
+  - Fallback regex extraction was unreliable and could introduce noise/false positives
+  - Better to skip and retry failed posts than accept potentially incorrect extractions
+  - Posts with books_extracted_at NULL get retried automatically on next run
+  - Simple retry-on-failure is more robust than complex fallback logic
 ---
