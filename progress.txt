@@ -733,3 +733,23 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Posts with books_extracted_at NULL get retried automatically on next run
   - Simple retry-on-failure is more robust than complex fallback logic
 ---
+
+## 2026-01-22 - US-034
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented debug file logging for full LLM responses on JSON parse failures
+- Files modified:
+  - analyzer.py: Added log_parse_failure_to_debug_file() helper function, updated extract_books_only() and analyze_post_with_llm() with post_url parameter
+- Features:
+  - log_parse_failure_to_debug_file(): Writes full responses to debug_parse_failures.log in script directory
+  - Log entry includes: timestamp, post title, post URL (if available), full raw response
+  - Both extract_books_only() and analyze_post_with_llm() now accept post_url parameter for debug logging
+  - Updated callers (extract_books_from_posts_llm and analyze_posts_full_context) to pass URL
+  - Terminal still shows truncated warning (500 chars) for quick visibility
+  - Debug file helps diagnose: extra text, unescaped chars, truncation, or other parsing issues
+- **Learnings for future iterations:**
+  - When adding optional debug logging, write to a separate file to avoid terminal spam
+  - Include timestamp and identifying info (title, URL) to correlate with other logs
+  - Use append mode for debug files so entries accumulate across runs
+  - Keep parameters optional with None defaults for backwards compatibility
+  - Separate "quick terminal feedback" (truncated) from "detailed diagnosis" (full file log)
+---

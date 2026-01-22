@@ -63,6 +63,37 @@ def clean_markdown_from_json(text):
     return ''.join(result)
 
 
+def log_parse_failure_to_debug_file(post_title, post_url, raw_response):
+    """Log full LLM response to debug file when JSON parsing fails.
+
+    Writes the complete raw response to debug_parse_failures.log for diagnosis.
+    This helps identify whether parse failures are due to extra text, unescaped
+    characters, truncation, or other issues.
+
+    Args:
+        post_title: Title of the post being processed
+        post_url: URL of the post (optional, can be None)
+        raw_response: The full raw LLM response text
+    """
+    import os
+    from datetime import datetime
+
+    # Write to debug file in same directory as this script
+    debug_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug_parse_failures.log')
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    with open(debug_file, 'a', encoding='utf-8') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"Timestamp: {timestamp}\n")
+        f.write(f"Post Title: {post_title or 'Unknown'}\n")
+        if post_url:
+            f.write(f"Post URL: {post_url}\n")
+        f.write(f"{'='*80}\n")
+        f.write(f"Full LLM Response:\n{raw_response}\n")
+        f.write(f"{'='*80}\n")
+
+
 def extract_italicized_titles(content_html):
     """Extract potential book titles from italicized text (<em> or <i> tags)."""
     if not content_html:
@@ -580,13 +611,14 @@ def call_llm(prompt, provider='ollama', model=None, api_key=None, temperature=0.
         raise ValueError(f"Unknown provider: {provider}. Use 'ollama' or 'gemini'.")
 
 
-def analyze_post_with_llm(post_content, model=None, post_title=None, provider='ollama', api_key=None):
+def analyze_post_with_llm(post_content, model=None, post_title=None, post_url=None, provider='ollama', api_key=None):
     """Analyze a full post with LLM to extract books and sentiment in one call.
 
     Args:
         post_content: The full post content_text (not a 300-char snippet)
         model: The model to use (defaults based on provider if not specified)
         post_title: Optional post title for error logging
+        post_url: Optional post URL for debug logging
         provider: LLM provider ('ollama' or 'gemini')
         api_key: API key for Gemini (ignored for Ollama)
 
@@ -679,6 +711,8 @@ Example response format:
                     title_info = f" for post: {post_title}" if post_title else ""
                     truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
                     print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
+                    # Log full response to debug file for diagnosis
+                    log_parse_failure_to_debug_file(post_title, post_url, response_text)
                     return []
             else:
                 # No JSON array found
@@ -993,7 +1027,7 @@ def analyze_posts_full_context(posts, model=None, provider='ollama', api_key=Non
     for i, (post_id, url, title, content_html, content_text) in enumerate(posts, 1):
         try:
             # Single LLM call returns all books with sentiment
-            books = analyze_post_with_llm(content_text, model=model, post_title=title, provider=provider, api_key=api_key)
+            books = analyze_post_with_llm(content_text, model=model, post_title=title, post_url=url, provider=provider, api_key=api_key)
 
             for book_data in books:
                 book_title = book_data['book_title']
@@ -1031,7 +1065,7 @@ def analyze_posts_full_context(posts, model=None, provider='ollama', api_key=Non
     return total_books_found, errors
 
 
-def extract_books_only(post_title, post_content, model=None, provider='ollama', api_key=None):
+def extract_books_only(post_title, post_content, model=None, post_url=None, provider='ollama', api_key=None):
     """Extract ONLY book titles from a post using LLM (no sentiment/reasoning).
 
     This function asks the LLM to identify all book titles mentioned in the post,
@@ -1041,6 +1075,7 @@ def extract_books_only(post_title, post_content, model=None, provider='ollama', 
         post_title: The title of the post (book might be mentioned here)
         post_content: The full post content_text
         model: The model to use (defaults based on provider if not specified)
+        post_url: Optional post URL for debug logging
         provider: LLM provider ('ollama' or 'gemini')
         api_key: API key for Gemini (ignored for Ollama)
 
@@ -1130,6 +1165,8 @@ If no books are found, respond with: []"""
             title_info = f" for post: {post_title}" if post_title else ""
             truncated = response_text[:500] + ("..." if len(response_text) > 500 else "")
             print(f"Warning: Could not parse JSON from LLM response{title_info}:\n{truncated}")
+            # Log full response to debug file for diagnosis
+            log_parse_failure_to_debug_file(post_title, post_url, response_text)
             return []
 
         # Validate the response
@@ -1209,7 +1246,7 @@ def extract_books_from_posts_llm(posts, model=None, workers=5, rate_limit=5.0, p
 
         try:
             # LLM call returns list of book title strings
-            book_titles = extract_books_only(post_title, content_text, model=model, provider=provider, api_key=api_key)
+            book_titles = extract_books_only(post_title, content_text, model=model, post_url=url, provider=provider, api_key=api_key)
 
             # Build full context: post title + content
             full_context = f"{post_title}\n\n{content_text}" if post_title else content_text

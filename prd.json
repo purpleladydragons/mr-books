@@ -593,6 +593,22 @@
       "priority": 33,
       "passes": true,
       "notes": "Removed extract_titles_from_malformed_response() function entirely. Updated extract_books_only() to just log warning and return empty list when JSON parsing fails. Post stays unextracted (books_extracted_at NULL) so it gets retried on next run. Updated Codebase Patterns in progress.txt to reflect new behavior."
+    },
+    {
+      "id": "US-034",
+      "title": "Log full LLM response on JSON parse failure for debugging",
+      "description": "As a developer, I want to see the complete raw response when JSON parsing fails so I can diagnose the actual issue.",
+      "acceptanceCriteria": [
+        "When JSON parsing fails in extract_books_only(), log the FULL raw response (not truncated)",
+        "Write full response to a debug file (e.g., debug_parse_failures.log) to avoid terminal spam",
+        "Include post title, post URL if available, and full response in the log entry",
+        "Keep the existing truncated warning in terminal for quick visibility",
+        "This helps diagnose whether issue is: extra text, unescaped chars, truncation, or something else",
+        "Script runs without errors"
+      ],
+      "priority": 34,
+      "passes": true,
+      "notes": "Added log_parse_failure_to_debug_file() helper function that writes full LLM responses to debug_parse_failures.log. Updated extract_books_only() and analyze_post_with_llm() to accept post_url parameter and call the helper on JSON parse failures. Updated callers in extract_books_from_posts_llm() and analyze_posts_full_context() to pass post_url. Debug log includes: timestamp, post title, post URL, and full raw response. Terminal still shows truncated warning for quick visibility."
     }
   ]
 }
