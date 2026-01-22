@@ -790,6 +790,73 @@ def get_comparison_count():
     return count
 
 
+def get_win_rates_vs_random(top_k_ids):
+    """Compute win rate vs random for each top-k item.
+
+    A "vs random" comparison is one where a top-k item faced a non-top-k item.
+    Win rate = wins / (wins + losses) for each top-k item.
+
+    Args:
+        top_k_ids: Set of mention IDs currently in top-k
+
+    Returns:
+        Dict mapping mention_id to dict with:
+        - wins: Number of wins against non-top-k items
+        - losses: Number of losses against non-top-k items
+        - total: Total comparisons vs random
+        - win_rate: wins/total (0-1), or None if no comparisons
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get all comparisons
+    cursor.execute('''
+        SELECT mention_a_id, mention_b_id, winner_id
+        FROM comparisons
+    ''')
+    comparisons = cursor.fetchall()
+    conn.close()
+
+    # Convert to set for O(1) lookup
+    top_k_set = set(top_k_ids)
+
+    # Track wins and losses for each top-k item
+    win_rates = {}
+    for mid in top_k_set:
+        win_rates[mid] = {'wins': 0, 'losses': 0, 'total': 0, 'win_rate': None}
+
+    for mention_a, mention_b, winner in comparisons:
+        # Check if this is a top-k vs non-top-k comparison
+        a_in_top = mention_a in top_k_set
+        b_in_top = mention_b in top_k_set
+
+        # Skip if both or neither are in top-k (not a validation comparison)
+        if a_in_top == b_in_top:
+            continue
+
+        # Identify which is the top-k item
+        top_item = mention_a if a_in_top else mention_b
+
+        # Skip ties (winner_id is None)
+        if winner is None:
+            continue
+
+        # Record win or loss
+        win_rates[top_item]['total'] += 1
+        if winner == top_item:
+            win_rates[top_item]['wins'] += 1
+        else:
+            win_rates[top_item]['losses'] += 1
+
+    # Calculate win rates
+    for mid in win_rates:
+        total = win_rates[mid]['total']
+        if total > 0:
+            win_rates[mid]['win_rate'] = win_rates[mid]['wins'] / total
+
+    return win_rates
+
+
 def update_mention_bt_score(mention_id, bt_score):
     """Update the Bradley-Terry score for a mention."""
     conn = get_connection()

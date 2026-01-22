@@ -1660,13 +1660,14 @@ def _sample_uncertain_pair(scored_items):
 
 
 def sample_pairs_topk(mention_ids, n_pairs, bt_scores, top_k):
-    """Sample pairs prioritizing comparisons that help identify top-k items.
+    """Sample pairs to validate top-k tier membership against random opponents.
 
-    Sampling strategy:
-    - 70% of comparisons involve at least one item currently in top 2*k
-    - Within top tier: prioritize comparisons between items with similar scores (bubble at cutoff)
-    - 20% of comparisons: top item vs random item (confirm top items beat average)
-    - 10% of comparisons: pure random (discover dark horses)
+    New sampling strategy focused on tier identification (not precise ranking):
+    - 80% of comparisons: top-k item vs random item (validate top items deserve their spot)
+    - 20% of comparisons: pure random (discover dark horses that might belong in top)
+
+    Items that consistently beat random opponents rise to top; items that lose fall out.
+    This is "survival of the fittest" - tier validation, not tournament seeding.
 
     Args:
         mention_ids: List of mention IDs to sample from
@@ -1679,58 +1680,44 @@ def sample_pairs_topk(mention_ids, n_pairs, bt_scores, top_k):
                and stats is dict with sampling statistics
     """
     import random
-    import math
 
     if len(mention_ids) < 2:
-        return [], {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+        return [], {'top_vs_random': 0, 'random': 0}
 
     # Get scored items and sort by score
     scored = [(mid, bt_scores.get(mid)) for mid in mention_ids
               if bt_scores.get(mid) is not None]
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    # Define top tier as top 2*k items
-    top_tier_size = min(2 * top_k, len(scored))
-    top_tier = scored[:top_tier_size] if scored else []
-    top_tier_ids = set(mid for mid, _ in top_tier)
+    # Define top-k items (the items we're validating)
+    top_k_actual = min(top_k, len(scored))
+    top_k_items = scored[:top_k_actual] if scored else []
+    top_k_ids = set(mid for mid, _ in top_k_items)
 
-    # Items at the "bubble" - around the top-k cutoff (items ranked k-20 to k+20)
-    bubble_start = max(0, top_k - 20)
-    bubble_end = min(len(scored), top_k + 20)
-    bubble_items = scored[bubble_start:bubble_end] if scored else []
+    # All items not in top-k (challengers)
+    non_top_ids = [mid for mid in mention_ids if mid not in top_k_ids]
 
-    # All items not in top tier
-    non_top_ids = [mid for mid in mention_ids if mid not in top_tier_ids]
+    # If no scores yet, use all items as potential top
+    if not top_k_items:
+        top_k_items = [(mid, None) for mid in mention_ids[:top_k]]
+        top_k_ids = set(mid for mid, _ in top_k_items)
+        non_top_ids = [mid for mid in mention_ids if mid not in top_k_ids]
 
     pairs = []
-    stats = {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+    stats = {'top_vs_random': 0, 'random': 0}
 
     for _ in range(n_pairs):
         r = random.random()
 
-        # Strategy 1: 70% - Compare items within top tier (or top vs top)
-        # Prioritize items at the bubble (close to cutoff)
-        if r < 0.7 and len(top_tier) >= 2:
-            # 60% of top-tier comparisons focus on bubble items
-            if len(bubble_items) >= 2 and random.random() < 0.6:
-                # Sample from bubble with uncertainty weighting
-                i, j = random.sample(range(len(bubble_items)), 2)
-                mid_a, _ = bubble_items[i]
-                mid_b, _ = bubble_items[j]
-            else:
-                # Sample from full top tier
-                i, j = random.sample(range(len(top_tier)), 2)
-                mid_a, _ = top_tier[i]
-                mid_b, _ = top_tier[j]
-            stats['top_tier'] += 1
-
-        # Strategy 2: 20% - Top item vs random item (verify top items)
-        elif r < 0.9 and top_tier and non_top_ids:
-            mid_a, _ = random.choice(top_tier)
+        # Strategy 1: 80% - Top-k item vs random item (validation)
+        # This is the core of the new approach: pit top items against random challengers
+        if r < 0.8 and top_k_items and non_top_ids:
+            mid_a, _ = random.choice(top_k_items)
             mid_b = random.choice(non_top_ids)
             stats['top_vs_random'] += 1
 
-        # Strategy 3: 10% - Pure random (discover dark horses)
+        # Strategy 2: 20% - Pure random (discover dark horses)
+        # Random comparisons can surface items that should be in top-k
         else:
             mid_a, mid_b = random.sample(mention_ids, 2)
             stats['random'] += 1
@@ -2529,11 +2516,12 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         insert_comparisons_batch,
         update_mention_bt_scores_batch,
         get_mentions_with_bt_scores,
-        update_book_bt_scores
+        update_book_bt_scores,
+        get_win_rates_vs_random
     )
 
     total_completed = 0
-    total_stats = {'top_tier': 0, 'top_vs_random': 0, 'random': 0}
+    total_stats = {'top_vs_random': 0, 'random': 0}
     stability_log = []  # Track stability over time
     consecutive_stable = 0
 
@@ -2575,8 +2563,8 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         for key in batch_stats:
             total_stats[key] += batch_stats[key]
 
-        print(f"Sampling strategy: {batch_stats['top_tier']} top-tier, "
-              f"{batch_stats['top_vs_random']} top-vs-random, {batch_stats['random']} random")
+        print(f"Sampling strategy: {batch_stats['top_vs_random']} top-vs-random (80%), "
+              f"{batch_stats['random']} random (20%)")
 
         # Create save callback for incremental saving within batches
         def save_results(results_batch):
@@ -2626,10 +2614,27 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         stability = compute_topk_stability(previous_topk, current_topk)
         stability_log.append((total_completed, stability))
 
+        # Compute win rates vs random for current top-k
+        win_rates = get_win_rates_vs_random(current_topk)
+
         print(f"Progress: {total_completed}/{n_comparisons} comparisons")
         print(f"  Top-{top_k} stability: {stability['stability_pct']:.1f}% ({stability['overlap']}/{top_k} unchanged)")
+
+        # Log tier movement (items moved in/out)
         if stability['changed'] > 0:
-            print(f"  Items changed: {stability['changed']}")
+            items_in = current_topk - previous_topk
+            items_out = previous_topk - current_topk
+            print(f"  Tier movement: {len(items_in)} in, {len(items_out)} out")
+
+        # Log win rate summary for items with at least 5 comparisons
+        items_with_enough_data = [mid for mid, wr in win_rates.items()
+                                   if wr['total'] >= 5]
+        if items_with_enough_data:
+            avg_win_rate = sum(win_rates[mid]['win_rate'] for mid in items_with_enough_data
+                               if win_rates[mid]['win_rate'] is not None) / len(items_with_enough_data)
+            min_wr = min((win_rates[mid]['win_rate'] for mid in items_with_enough_data
+                          if win_rates[mid]['win_rate'] is not None), default=0)
+            print(f"  Win rate vs random: avg={avg_win_rate*100:.1f}%, min={min_wr*100:.1f}% ({len(items_with_enough_data)} items with 5+ comparisons)")
 
         # Check for early stopping
         if stability['stability_pct'] >= 100.0:
@@ -2646,16 +2651,15 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
 
     # Final summary
     print("\n" + "=" * 60)
-    print("TOP-K FOCUSED SAMPLING COMPLETE")
+    print("TOP-K TIER VALIDATION COMPLETE")
     print("=" * 60)
     print(f"\nTotal comparisons made: {total_completed}")
     if total_completed < n_comparisons:
         print(f"(Stopped early - requested {n_comparisons})")
     print(f"\nSampling strategy breakdown:")
     if total_completed > 0:
-        print(f"  Top-tier comparisons: {total_stats['top_tier']} ({total_stats['top_tier']/total_completed*100:.1f}%)")
-        print(f"  Top vs random: {total_stats['top_vs_random']} ({total_stats['top_vs_random']/total_completed*100:.1f}%)")
-        print(f"  Pure random: {total_stats['random']} ({total_stats['random']/total_completed*100:.1f}%)")
+        print(f"  Top-k vs random (validation): {total_stats['top_vs_random']} ({total_stats['top_vs_random']/total_completed*100:.1f}%)")
+        print(f"  Pure random (discovery): {total_stats['random']} ({total_stats['random']/total_completed*100:.1f}%)")
 
     # Show stability history
     if stability_log:
@@ -2663,11 +2667,27 @@ def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_i
         for completed, stab in stability_log[-5:]:  # Show last 5
             print(f"  After {completed} comparisons: {stab['stability_pct']:.1f}% stable")
 
+    # Show final win rates for top-k items
+    final_topk = _get_topk_set(bt_scores, top_k)
+    final_win_rates = get_win_rates_vs_random(final_topk)
+    items_with_data = [(mid, wr) for mid, wr in final_win_rates.items() if wr['total'] >= 5]
+    if items_with_data:
+        items_with_data.sort(key=lambda x: x[1]['win_rate'] or 0, reverse=True)
+        print(f"\nWin rate vs random for top-{top_k} items (confidence metric):")
+        # Show items with lowest win rates (potential false positives)
+        low_confidence = [(mid, wr) for mid, wr in items_with_data if (wr['win_rate'] or 0) < 0.6]
+        if low_confidence:
+            print(f"  Low confidence items (win rate < 60%): {len(low_confidence)}")
+            for mid, wr in low_confidence[:5]:  # Show up to 5
+                print(f"    ID {mid}: {wr['win_rate']*100:.1f}% ({wr['wins']}/{wr['total']} wins)")
+        high_confidence = [(mid, wr) for mid, wr in items_with_data if (wr['win_rate'] or 0) >= 0.8]
+        print(f"  High confidence items (win rate >= 80%): {len(high_confidence)}")
+
     # Aggregate to book level
     print("\nAggregating scores to book level...")
     update_book_bt_scores()
 
-    print(f"\nDone! Top-{top_k} ranking complete.")
+    print(f"\nDone! Top-{top_k} tier validation complete.")
     print(f"Run 'python main.py rankings --top {top_k}' to see the results.")
 
 
