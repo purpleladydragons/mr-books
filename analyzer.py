@@ -891,9 +891,9 @@ def analyze_book_mentions(use_ollama=False, model='llama3.2:3b'):
             else:
                 skipped += 1
 
-        except ConnectionError:
-            # Ollama connection failed - abort
-            print(f"\nAborting: Ollama is not available. Analyzed {analyzed} mentions before error.")
+        except ConnectionError as e:
+            # LLM connection failed - abort
+            print(f"\nAborting: LLM connection failed: {e}. Analyzed {analyzed} mentions before error.")
             return
         except Exception as e:
             print(f"\nError analyzing mention {mention_id}: {e}")
@@ -1066,8 +1066,8 @@ def analyze_posts_full_context(posts, model=None, provider='ollama', api_key=Non
             # Mark post as processed
             mark_post_books_extracted(post_id)
 
-        except ConnectionError:
-            print(f"\nOllama connection failed. Stopping analysis.")
+        except ConnectionError as e:
+            print(f"\nLLM connection failed: {e}. Stopping analysis.")
             return total_books_found, errors
         except Exception as e:
             print(f"\nWarning: Error processing post '{title}': {e}")
@@ -1315,7 +1315,9 @@ def extract_books_from_posts_llm(posts, model=None, workers=5, rate_limit=5.0, p
 
                 if result['error']:
                     if 'connection_error' in result['error']:
-                        print(f"\nOllama connection failed. Stopping extraction.")
+                        # Extract actual error message from 'connection_error: {actual_error}'
+                        error_msg = result['error'].replace('connection_error: ', '')
+                        print(f"\nLLM connection failed: {error_msg}. Stopping extraction.")
                         connection_failed = True
                         # Cancel remaining futures
                         for f in future_to_post:
