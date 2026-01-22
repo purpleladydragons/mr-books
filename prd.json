@@ -528,6 +528,25 @@
       "priority": 29,
       "passes": true,
       "notes": "Implemented chain-of-thought prompting that requires model to analyze BOTH reviews explicitly before deciding. Prompt now says: 'Analyze BOTH reviews before deciding: 1. First, describe the sentiment in Review A (1 sentence) 2. Then, describe the sentiment in Review B (1 sentence) 3. Finally, state which is more positive and write your answer: A or B'. Parsing logic updated to extract final answer from end of response using multiple patterns (standalone letter, 'Answer: X', regex). Added 'reasoning' field to debug_info and format_debug_output(). Added A vs B win rate logging alongside tie rate. Win rate improved from ~100% A to ~47%/53% (within target 45-55%). All 10 golden tests pass."
+    },
+    {
+      "id": "US-030",
+      "title": "Adjust top-k sampling to validate against random picks rather than refine within top",
+      "description": "As a user, I want top-k sampling to confirm items deserve to be in the top tier by comparing them against random items, not just each other.",
+      "acceptanceCriteria": [
+        "Change top-k sampling strategy to prioritize 'top vs random' comparisons over 'top vs top'",
+        "New distribution: 80% top-k item vs random item, 20% pure random (for discovery)",
+        "Remove or minimize 'top vs top' comparisons - exact ranking within tier doesn't matter",
+        "Goal is tier identification (top 10, top 50, top 100) not precise ranking",
+        "Items that consistently beat random opponents rise to top; items that lose fall out",
+        "Track 'win rate vs random' per item as a confidence metric",
+        "Log tier stability: how many items moved in/out of top-k since last batch",
+        "Consider early stopping when tier membership stabilizes (not just ranking)",
+        "Script runs without errors: python main.py rank --comparisons 5000 --top-k 100 --workers 5"
+      ],
+      "priority": 30,
+      "passes": true,
+      "notes": "Changed sample_pairs_topk() to use 80% top-vs-random, 20% pure random (removed top-vs-top comparisons entirely). Added get_win_rates_vs_random() in db.py to compute win rates against random opponents. Updated _run_topk_ranking() to log tier movement (items in/out) and win rate metrics (avg, min, low/high confidence item counts). Early stopping based on tier membership stability was already implemented from US-018."
     }
   ]
 }
