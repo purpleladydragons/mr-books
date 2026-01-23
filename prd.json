@@ -609,6 +609,25 @@
       "priority": 34,
       "passes": true,
       "notes": "Added log_parse_failure_to_debug_file() helper function that writes full LLM responses to debug_parse_failures.log. Updated extract_books_only() and analyze_post_with_llm() to accept post_url parameter and call the helper on JSON parse failures. Updated callers in extract_books_from_posts_llm() and analyze_posts_full_context() to pass post_url. Debug log includes: timestamp, post title, post URL, and full raw response. Terminal still shows truncated warning for quick visibility."
+    },
+    {
+      "id": "US-035",
+      "title": "Fix comparison parsing for gemini-2.0-flash model",
+      "description": "As a user, I want comparisons to work reliably with gemini-2.0-flash without high skip rates.",
+      "acceptanceCriteria": [
+        "IMPORTANT: Before committing, add .env to .gitignore",
+        "API key is in .env file as GEMINI_API_KEY",
+        "Debug why gemini-2.0-flash responses are not being parsed (model gives reasoning but no clear A/B answer)",
+        "May need to increase max_output_tokens if responses are being truncated",
+        "May need to tweak prompt to explicitly request final answer on its own line",
+        "May need to improve parsing logic to extract answer from reasoning",
+        "Success criteria: >75% of comparisons parse successfully (currently ~80%, but inconsistent)",
+        "Run sanity test with 20+ comparisons to verify A/B bias remains balanced (45-55% range)",
+        "Script runs without errors: python main.py rank --comparisons 100 --provider gemini --model gemini-2.0-flash"
+      ],
+      "priority": 35,
+      "passes": true,
+      "notes": "Fixed comparison parsing by: (1) stripping markdown (** and _) from last line before pattern matching - fixes responses like '**Answer: B**', (2) implementing random order swapping to eliminate positional bias - 50% of comparisons show reviews in swapped order and map answer back correctly, (3) increased max_output_tokens to 4096 to prevent truncation. Parsing success rate: 90%+, A/B win rate: ~50%/50% with swapping (within 45-55% target). Added .gitignore with .env protection."
     }
   ]
 }

@@ -1,0 +1,23 @@
+# Environment files
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Database
+mr_books.db
+
+# IDE
+.idea/
+.vscode/
+
+# Debug logs
+debug_parse_failures.log
+
+# Ralph agent
+.last-branch
+tasks/
+prompt.md
+ralph.sh

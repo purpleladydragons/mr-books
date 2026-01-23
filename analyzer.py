@@ -557,25 +557,34 @@ def call_gemini(prompt, model='gemini-2.5-flash', api_key=None, temperature=0.1,
     # Configure generation
     config = types.GenerateContentConfig(
         temperature=temperature,
-        max_output_tokens=2048,
+        max_output_tokens=4096,  # Plenty for a JSON array of book titles
     )
 
     # Retry logic for rate limits
     for attempt in range(max_retries):
         try:
+            print(">", end="", flush=True)  # Request starting
+            start = time.time()
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
                 config=config,
             )
+            elapsed = time.time() - start
+            # Check finish reason - log if not STOP (normal completion)
+            if response.candidates and response.candidates[0].finish_reason:
+                finish_reason = response.candidates[0].finish_reason
+                if str(finish_reason) not in ('STOP', 'FinishReason.STOP'):
+                    print(f"Warning: Gemini finish_reason={finish_reason}")
+            print(f"[{elapsed:.1f}s]", end="", flush=True)  # Progress with timing
             return response.text.strip()
         except Exception as e:
             error_str = str(e).lower()
-            # Check for rate limit or transient server errors (429, 503, overloaded)
-            if 'rate' in error_str or '429' in error_str or 'quota' in error_str or '503' in error_str or 'overload' in error_str or 'unavailable' in error_str:
+            # Check for rate limit or transient server errors (429, 503, 504, overloaded)
+            if 'rate' in error_str or '429' in error_str or 'quota' in error_str or '503' in error_str or '504' in error_str or 'overload' in error_str or 'unavailable' in error_str or 'deadline' in error_str:
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
-                    print(f"Transient error, waiting {wait_time}s before retry...")
+                    print(f"Transient error ({e}), waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                     continue
             raise ConnectionError(f"Gemini API error: {e}")
@@ -1104,11 +1113,6 @@ IMPORTANT: Only extract book titles that TYLER COWEN personally mentions or comm
 
 Look for speaker tags like "TYLER:", "TYLER COWEN:", "TC:" to identify Tyler's statements.
 
-Post Title: {post_title}
-
-Post Content:
-{analysis_text}
-
 List ALL book titles mentioned in this post that Tyler Cowen mentions or comments on.
 Include the FULL book title with subtitle if present (e.g., "Book Title: The Subtitle").
 If the post title contains a book title and the body mentions a subtitle (e.g., "the subtitle is X"), combine them into one full title.
@@ -1117,14 +1121,14 @@ Return ONLY valid JSON. Do NOT use markdown formatting like * or _ in your respo
 Respond with a JSON array of book title strings.
 Example: ["The Great Gatsby", "Thinking Fast and Slow: Why We Make Bad Decisions"]
 
-If no books are found or Tyler doesn't mention any books, respond with: []"""
-    else:
-        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This is a regular blog post where Tyler is the author.
+If no books are found or Tyler doesn't mention any books, respond with: []
 
 Post Title: {post_title}
 
 Post Content:
-{analysis_text}
+{analysis_text}"""
+    else:
+        prompt = f"""You are analyzing a blog post from Tyler Cowen's "Marginal Revolution" blog. This is a regular blog post where Tyler is the author.
 
 List ALL book titles mentioned in this post.
 Include the FULL book title with subtitle if present (e.g., "Book Title: The Subtitle").
@@ -1135,7 +1139,12 @@ Return ONLY valid JSON. Do NOT use markdown formatting like * or _ in your respo
 Respond with a JSON array of book title strings.
 Example: ["The Great Gatsby", "Thinking Fast and Slow: Why We Make Bad Decisions"]
 
-If no books are found, respond with: []"""
+If no books are found, respond with: []
+
+Post Title: {post_title}
+
+Post Content:
+{analysis_text}"""
 
     # Call LLM
     try:
@@ -1191,7 +1200,7 @@ If no books are found, respond with: []"""
         return []
 
 
-def extract_books_from_posts_llm(posts, model=None, workers=5, rate_limit=5.0, provider='ollama', api_key=None):
+def extract_books_from_posts_llm(posts, model=None, workers=5, rate_limit=100.0, provider='ollama', api_key=None):
     """Extract books from posts using LLM (extraction only, no sentiment).
 
     This function extracts book titles and stores full post content as context_text.
@@ -1809,6 +1818,7 @@ def compare_pair_with_llm(mention_a, mention_b, model=None, debug=False, provide
         If debug=True:
             Dict with keys: result, title_a, title_b, prompt, raw_response, parsed_result, error
     """
+    import random
     mention_a_id, book_a_id, title_a, context_a, content_a = mention_a
     mention_b_id, book_b_id, title_b, context_b, content_b = mention_b
 
@@ -1820,13 +1830,23 @@ def compare_pair_with_llm(mention_a, mention_b, model=None, debug=False, provide
     text_a = text_a[:1500] if len(text_a) > 1500 else text_a
     text_b = text_b[:1500] if len(text_b) > 1500 else text_b
 
+    # Randomly swap order to eliminate positional bias
+    # Track swap so we can map the answer back correctly
+    swapped = random.random() < 0.5
+    if swapped:
+        prompt_title_a, prompt_title_b = title_b, title_a
+        prompt_text_a, prompt_text_b = text_b, text_a
+    else:
+        prompt_title_a, prompt_title_b = title_a, title_b
+        prompt_text_a, prompt_text_b = text_a, text_b
+
     prompt = f"""Compare these two book reviews from Tyler Cowen's blog. Which review expresses a MORE POSITIVE sentiment toward its book?
 
-REVIEW A - About "{title_a}":
-{text_a}
+REVIEW A - About "{prompt_title_a}":
+{prompt_text_a}
 
-REVIEW B - About "{title_b}":
-{text_b}
+REVIEW B - About "{prompt_title_b}":
+{prompt_text_b}
 
 You MUST choose either A or B. There is no tie option. Even if the difference is subtle, one review is always slightly more positive. Look for:
 - Superlatives ("best", "excellent", "must-read" vs "good", "interesting", "worth reading")
@@ -1834,10 +1854,11 @@ You MUST choose either A or B. There is no tie option. Even if the difference is
 - Recommendation strength ("highly recommend" vs "might enjoy")
 - Criticism level (any negatives mentioned vs pure praise)
 
-Analyze BOTH reviews before deciding:
-1. First, describe the sentiment in Review A (1 sentence)
-2. Then, describe the sentiment in Review B (1 sentence)
-3. Finally, state which is more positive and write your answer: A or B"""
+Think step by step:
+1. Read Review A carefully. What sentiment does it express? (1 sentence)
+2. Read Review B carefully. What sentiment does it express? (1 sentence)
+3. Compare the two sentiments. Which is more positive?
+4. Your final answer (just the letter): A or B"""
 
     debug_info = {
         'title_a': title_a,
@@ -1862,31 +1883,35 @@ Analyze BOTH reviews before deciding:
         # Check last line first
         lines = response_stripped.split('\n')
         last_line = lines[-1].strip().upper() if lines else ""
+        # Strip markdown formatting (**, *, _) for cleaner parsing
+        last_line_clean = re.sub(r'[\*_]+', '', last_line).strip()
 
         parsed_answer = None
 
-        # Check if last line is just "A" or "B"
-        if last_line == 'A':
+        # Check if last line (cleaned) is just "A" or "B"
+        if last_line_clean == 'A':
             parsed_answer = 'A'
-        elif last_line == 'B':
+        elif last_line_clean == 'B':
             parsed_answer = 'B'
-        # Check for "Answer: A" or "Final answer: B" patterns
-        elif re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line, re.IGNORECASE):
-            match = re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line, re.IGNORECASE)
+        # Check for "Answer: A" or "Final answer: B" patterns (on cleaned line)
+        elif re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line_clean, re.IGNORECASE):
+            match = re.search(r'(?:answer|choice|final)[:\s]*([AB])\s*$', last_line_clean, re.IGNORECASE)
             parsed_answer = match.group(1).upper()
-        # Check last few characters for standalone letter
-        elif re.search(r'\b([AB])\s*$', response_stripped.upper()):
-            match = re.search(r'\b([AB])\s*$', response_stripped.upper())
-            parsed_answer = match.group(1)
-        # Fallback: look for any clear A or B choice in the response
+        # Check last few characters for standalone letter (on full response, stripped of markdown)
         else:
-            # Count mentions of "Review A" vs "Review B" as winner indicators
-            a_mentions = len(re.findall(r'review\s*a\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
-            b_mentions = len(re.findall(r'review\s*b\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
-            if a_mentions > b_mentions:
-                parsed_answer = 'A'
-            elif b_mentions > a_mentions:
-                parsed_answer = 'B'
+            response_clean = re.sub(r'[\*_]+', '', response_stripped.upper()).strip()
+            if re.search(r'\b([AB])\s*$', response_clean):
+                match = re.search(r'\b([AB])\s*$', response_clean)
+                parsed_answer = match.group(1)
+            # Fallback: look for any clear A or B choice in the response
+            else:
+                # Count mentions of "Review A" vs "Review B" as winner indicators
+                a_mentions = len(re.findall(r'review\s*a\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
+                b_mentions = len(re.findall(r'review\s*b\s*(?:is|expresses|shows|has)', response_stripped, re.IGNORECASE))
+                if a_mentions > b_mentions:
+                    parsed_answer = 'A'
+                elif b_mentions > a_mentions:
+                    parsed_answer = 'B'
 
         # Store reasoning (everything except the final answer line)
         if len(lines) > 1:
@@ -1894,21 +1919,31 @@ Analyze BOTH reviews before deciding:
         else:
             debug_info['reasoning'] = response_stripped
 
+        # Map the LLM's answer back to the original mention IDs
+        # If we swapped the order, we need to flip A<->B
         if parsed_answer == 'A':
-            debug_info['parsed_result'] = 'A'
-            result = (mention_a_id, mention_b_id, mention_a_id)
+            # LLM chose position A - map back to original ID
+            if swapped:
+                # Position A was actually mention_b (we swapped)
+                debug_info['parsed_result'] = 'B (swapped)'
+                result = (mention_a_id, mention_b_id, mention_b_id)
+            else:
+                debug_info['parsed_result'] = 'A'
+                result = (mention_a_id, mention_b_id, mention_a_id)
         elif parsed_answer == 'B':
-            debug_info['parsed_result'] = 'B'
-            result = (mention_a_id, mention_b_id, mention_b_id)
-        else:
-            # Model tried to avoid choosing - randomly pick to avoid bias
-            import random
-            forced_choice = random.choice(['A', 'B'])
-            debug_info['parsed_result'] = f'{forced_choice} (forced from: {response_text[:100]})'
-            if forced_choice == 'A':
+            # LLM chose position B - map back to original ID
+            if swapped:
+                # Position B was actually mention_a (we swapped)
+                debug_info['parsed_result'] = 'A (swapped)'
                 result = (mention_a_id, mention_b_id, mention_a_id)
             else:
+                debug_info['parsed_result'] = 'B'
                 result = (mention_a_id, mention_b_id, mention_b_id)
+        else:
+            # Could not parse answer - skip this comparison rather than add noise
+            print(f"Warning: Could not parse A/B from comparison response, skipping. Response: {response_text[:200]}...")
+            debug_info['parsed_result'] = 'SKIPPED (unparseable)'
+            result = None
 
         if debug:
             debug_info['result'] = result
@@ -1917,8 +1952,9 @@ Analyze BOTH reviews before deciding:
 
     except Exception as e:
         debug_info['error'] = str(e)
-        debug_info['parsed_result'] = 'TIE (error)'
-        result = (mention_a_id, mention_b_id, None)
+        debug_info['parsed_result'] = 'SKIPPED (error)'
+        print(f"Warning: Comparison error, skipping: {e}")
+        result = None
         if debug:
             debug_info['result'] = result
             return debug_info
@@ -2070,8 +2106,10 @@ def compare_pairs_parallel(pairs, model=None, workers=5, rate_limit=5.0,
                                     comparison_counter[0] += 1
                                     comp_num = comparison_counter[0]
                                 write_debug(format_debug_output(comp_num, result))
-                                all_results.append(result['result'])
-                                pending_results.append(result['result'])
+                                # Only save if we got a valid comparison (not skipped)
+                                if result['result'] is not None:
+                                    all_results.append(result['result'])
+                                    pending_results.append(result['result'])
                             else:
                                 all_results.append(result)
                                 pending_results.append(result)
