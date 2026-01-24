@@ -826,3 +826,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - LLM prompt should allow returning empty array for unclear/niche books rather than forcing labels
   - Normalize genre names to lowercase for consistency (avoids "History" vs "history" duplicates)
 ---
+
+## 2026-01-24 - US-038
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented Flask-based web UI for reviewing and correcting comparisons
+- Files created:
+  - review_ui.py: Flask app with routes for index, comparison view, and correction
+- Files modified:
+  - requirements.txt: Added flask dependency
+  - db.py: Added manually_corrected/corrected_at columns, review UI DB functions
+  - main.py: Added review-ui command with --port flag
+  - prd.json: Updated US-038 to passes=true
+- Features:
+  - Single comparison view showing Review A and Review B side by side
+  - Book titles prominently displayed with winner/loser indicators (green/red borders)
+  - WINNER/LOSER badges next to book titles
+  - Scrollable context_text panels (max-height: 400px with overflow)
+  - Previous/Next navigation buttons with keyboard shortcuts (left/right arrow keys)
+  - Position indicator showing "Comparison X of Y"
+  - Correct button to flip winner (A->B or B->A), updates winner_id and marks manually_corrected=TRUE
+  - "Manually Corrected" badge indicator on corrected comparisons
+  - Analytics section showing: total comparisons, manually corrected count, correction rate %
+  - Index page with stats summary and "Start Reviewing" button
+- Command: python main.py review-ui --port 5000
+- **Learnings for future iterations:**
+  - Flask render_template_string() is convenient for single-file apps with embedded templates
+  - SQLite INTEGER works as boolean (0/1) with Python bool() conversion
+  - Use daemon=True for background threads in testing to auto-cleanup
+  - For comparison navigation, store all IDs in JS array and use index for prev/next
+  - Keyboard shortcuts with document.addEventListener('keydown') for arrow key navigation
+---
