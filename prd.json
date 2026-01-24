@@ -663,8 +663,8 @@
         "Script runs without errors: python main.py label-genres --provider gemini --workers 5"
       ],
       "priority": 37,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented with genres and book_genres tables (CASCADE delete). Created label_book_genre() for LLM-based genre inference, label_genres_parallel() for parallel processing, and run_genre_labeling() as main entry point. CLI: python main.py label-genres --provider gemini --workers 5. Supports --reset flag to clear and reprocess all. Books get multiple genres including general and specific (e.g., Napoleon biography gets biography, history, European history, military history)."
     },
     {
       "id": "US-038",

@@ -801,3 +801,28 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Debug files should be added to .gitignore to avoid committing them
   - Having both prompt AND response in the log helps diagnose if issue is prompt or parsing
 ---
+
+## 2026-01-24 - US-037
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented LLM-based genre labeling for books
+- Files modified:
+  - db.py: Added genres table, book_genres junction table with CASCADE delete, genre labeling DB functions
+  - analyzer.py: Added label_book_genre(), label_genres_parallel(), run_genre_labeling() functions
+  - main.py: Added label-genres command with --provider, --workers, --reset flags
+  - prd.json: Updated US-037 to passes=true
+- Features:
+  - Multiple genres per book: supports both general and specific (e.g., Napoleon biography gets "biography", "history", "European history", "military history")
+  - ON DELETE CASCADE: when a book is deleted, its book_genres entries are automatically removed
+  - Incremental processing: only processes books without genre labels by default
+  - --reset flag: clears all book_genres entries and reprocesses all books
+  - Parallel processing with RateLimiter for LLM calls (same pattern as extraction and ranking)
+  - LLM prompt includes book title and combined context_text from all mentions
+  - If genre is unclear, returns empty list (doesn't force labels)
+- Command: python main.py label-genres --provider gemini --workers 5
+- **Learnings for future iterations:**
+  - Junction tables (book_genres) with ON DELETE CASCADE simplify cleanup when parent records are deleted
+  - Use GROUP_CONCAT to combine multiple context texts for a book in a single query
+  - Genre labeling follows same parallel pattern: ThreadPoolExecutor + RateLimiter + batch DB writes
+  - LLM prompt should allow returning empty array for unclear/niche books rather than forcing labels
+  - Normalize genre names to lowercase for consistency (avoids "History" vs "history" duplicates)
+---
