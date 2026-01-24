@@ -61,6 +61,9 @@ Started: Mon Jan 19 16:47:53 PST 2026
 - Positional Bias: Force explicit analysis of BOTH options before deciding; prompt structure: "1. Analyze A, 2. Analyze B, 3. Compare and answer"
 - Positional Bias: Parse final answer from END of response (multiple patterns: standalone letter, "Answer: X", regex)
 - Positional Bias: Log A vs B win rate: "A vs B win rate: A=X% (n), B=Y% (m) - target: 45-55% each"
+- Positional Bias: Random order swapping (50% of comparisons) is more robust than prompt engineering; track `swapped` flag and map answer back
+- Gemini Parsing: Strip markdown (** and _) from response before pattern matching; use re.sub(r'[\*_]+', '', line)
+- Gemini Parsing: Increase max_output_tokens to 4096 to prevent truncation of reasoning+answer responses
 ---
 
 ## 2026-01-19 - US-001
@@ -752,4 +755,49 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Use append mode for debug files so entries accumulate across runs
   - Keep parameters optional with None defaults for backwards compatibility
   - Separate "quick terminal feedback" (truncated) from "detailed diagnosis" (full file log)
+---
+
+## 2026-01-23 - US-035
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Fixed comparison parsing for gemini-2.0-flash model
+- Files modified:
+  - analyzer.py: Added markdown stripping, random order swapping, increased max_output_tokens
+  - .gitignore: Created with .env protection
+  - prd.json: Updated US-035 to passes=true
+- Features:
+  - Strip markdown (** and _) from response before parsing - fixes "**Answer: B**" patterns
+  - Random order swapping: 50% of comparisons show A/B in swapped order to eliminate positional bias
+  - Mapping logic correctly translates swapped responses back to original mention IDs
+  - Increased max_output_tokens from 2048 to 4096 to prevent truncation
+  - Added .gitignore with .env, __pycache__, mr_books.db, and debug logs
+- Results:
+  - Parsing success rate: 90%+ (target was >75%)
+  - A/B win rate: ~50%/50% with random swapping (target was 45-55%)
+  - Golden tests: 9/10 pass (extraction_005 failure is model behavior, not parsing)
+- **Learnings for future iterations:**
+  - Gemini often wraps answers in markdown formatting (**Answer: B**) - strip before parsing
+  - LLMs have strong positional bias (70%+ first option without mitigation)
+  - Random order swapping is more robust than prompt engineering to fix positional bias
+  - When swapping order, track the swap state and map answer back to original IDs
+  - Prompt engineering approaches overcorrect: "don't favor A" leads to favoring B
+---
+
+## 2026-01-24 - US-036
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Implemented debug file logging for unparseable comparison responses
+- Files modified:
+  - analyzer.py: Added log_comparison_failure_to_debug_file() function, called from compare_pair_with_llm()
+  - .gitignore: Added debug_comparison_failures.log
+  - prd.json: Updated US-036 to passes=true
+- Features:
+  - log_comparison_failure_to_debug_file(): Writes full details to debug_comparison_failures.log
+  - Log entry includes: timestamp, book A title, book B title, full prompt, full raw response
+  - File is append-only so entries accumulate across runs
+  - Existing terminal warning still shown (truncated to 200 chars) for quick visibility
+  - Follows same pattern as US-034's log_parse_failure_to_debug_file() for extraction
+- **Learnings for future iterations:**
+  - Same pattern as extraction debug logging - separate debug file for detailed diagnosis
+  - Keep terminal warning short (200 chars), full details in append-only debug file
+  - Debug files should be added to .gitignore to avoid committing them
+  - Having both prompt AND response in the log helps diagnose if issue is prompt or parsing
 ---

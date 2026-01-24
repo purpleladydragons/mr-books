@@ -15,6 +15,7 @@ mr_books.db
 
 # Debug logs
 debug_parse_failures.log
+debug_comparison_failures.log
 
 # Ralph agent
 .last-branch

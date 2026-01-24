@@ -628,6 +628,72 @@
       "priority": 35,
       "passes": true,
       "notes": "Fixed comparison parsing by: (1) stripping markdown (** and _) from last line before pattern matching - fixes responses like '**Answer: B**', (2) implementing random order swapping to eliminate positional bias - 50% of comparisons show reviews in swapped order and map answer back correctly, (3) increased max_output_tokens to 4096 to prevent truncation. Parsing success rate: 90%+, A/B win rate: ~50%/50% with swapping (within 45-55% target). Added .gitignore with .env protection."
+    },
+    {
+      "id": "US-036",
+      "title": "Log unparseable comparison responses for debugging",
+      "description": "As a developer, I want unparseable comparison responses logged so I can analyze and fix parsing issues later.",
+      "acceptanceCriteria": [
+        "When a comparison response cannot be parsed to A or B, log the full details",
+        "Log to a file (e.g., debug_comparison_failures.log) or a new DB table",
+        "Include: timestamp, book A title, book B title, full prompt, full raw response",
+        "Keep the existing terminal warning for quick visibility",
+        "Log should be append-only so multiple runs accumulate data",
+        "Script runs without errors"
+      ],
+      "priority": 36,
+      "passes": true,
+      "notes": "Added log_comparison_failure_to_debug_file() function that writes to debug_comparison_failures.log. Logs: timestamp, book A title, book B title, full prompt, full raw response. Called from compare_pair_with_llm() when parsing fails. Terminal warning still shown (truncated to 200 chars). Added debug_comparison_failures.log to .gitignore."
+    },
+    {
+      "id": "US-037",
+      "title": "Add LLM-based genre labeling for books",
+      "description": "As a user, I want books labeled with genres for filtering and discovery.",
+      "acceptanceCriteria": [
+        "Create new CLI command: python main.py label-genres --provider gemini --workers 5",
+        "Only works when book extractions already exist - error if no books in DB",
+        "DB schema: create 'genres' table (id, name UNIQUE) and 'book_genres' junction table (book_id, genre_id, FOREIGN KEY with ON DELETE CASCADE)",
+        "CASCADE: when a book is deleted, its book_genres entries are automatically deleted",
+        "For each book, use book title + associated post context_text to determine genre(s)",
+        "Support MULTIPLE genres per book - store BOTH general and specific (e.g., Napoleon biography gets 'biography', 'history', AND 'European history')",
+        "Use specific genres where possible ('Chinese history' not just 'history', 'science fiction' not just 'fiction')",
+        "If genre is unclear or book is too niche, leave with no genres - don't force labels",
+        "Incremental: only process books with no genre labels yet",
+        "Add --reset flag to delete all book_genres entries and reprocess all books",
+        "Script runs without errors: python main.py label-genres --provider gemini --workers 5"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Build local web UI for reviewing and correcting comparisons",
+      "description": "As a user, I want a simple web UI to review LLM comparisons and manually correct incorrect ones.",
+      "acceptanceCriteria": [
+        "Create simple local web UI using Flask or similar lightweight framework",
+        "Add Flask to requirements.txt",
+        "Create new CLI command: python main.py review-ui --port 5000",
+        "Single comparison view: show ONE comparison at a time (not a list)",
+        "Display Review A on left side, Review B on right side",
+        "Display book titles prominently for each review",
+        "Show which review was rated as winner (A or B) with clear visual indicator",
+        "Show full context_text for each book mention (scrollable if long)",
+        "Navigation: Previous and Next buttons to move between comparisons",
+        "Keyboard shortcuts: Left arrow for previous, Right arrow for next",
+        "Show current position indicator (e.g., '42 of 1,234')",
+        "Add 'Correct' button that allows user to flip the winner (A→B or B→A)",
+        "DB schema: add 'manually_corrected' boolean column to comparisons table (default FALSE)",
+        "DB schema: add 'corrected_at' timestamp column to comparisons table (nullable)",
+        "When user corrects a comparison: update winner_id, set manually_corrected=TRUE, set corrected_at=NOW()",
+        "Show badge/indicator on comparisons that have been manually corrected",
+        "Add analytics section showing: total comparisons, manually corrected count, correction rate %",
+        "UI should be functional but simple - no need for elaborate styling",
+        "Script runs without errors: python main.py review-ui"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
     }
   ]
 }

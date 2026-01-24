@@ -52,7 +52,8 @@ def cmd_rankings(args):
     # Use Bradley-Terry scores if available, otherwise fall back to sentiment scores
     if has_bt_scores():
         print("(Using Bradley-Terry pairwise rankings)\n")
-        get_ranked_books_by_bt(top=args.top, genre=args.genre)
+        min_comp = getattr(args, 'min_comparisons', None)
+        get_ranked_books_by_bt(top=args.top, genre=args.genre, min_comparisons=min_comp)
     else:
         print("(Using sentiment scores - run 'python main.py rank' for better rankings)\n")
         get_ranked_books(top=args.top, genre=args.genre)
@@ -183,6 +184,12 @@ def main():
         type=str,
         default=None,
         help='Filter by genre'
+    )
+    rankings_parser.add_argument(
+        '--min-comparisons',
+        type=int,
+        default=None,
+        help='Only show books with at least N comparisons (filters out noisy rankings)'
     )
     rankings_parser.set_defaults(func=cmd_rankings)
 

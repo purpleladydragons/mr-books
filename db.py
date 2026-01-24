@@ -921,12 +921,13 @@ def update_book_bt_scores():
     conn.close()
 
 
-def get_ranked_books_by_bt(top=None, genre=None):
+def get_ranked_books_by_bt(top=None, genre=None, min_comparisons=None):
     """Get books ranked by Bradley-Terry score and print formatted results.
 
     Args:
         top: Limit results to top N books (default: all books)
         genre: Filter by genre
+        min_comparisons: Minimum number of comparisons required (default: no filter)
 
     Returns:
         List of dicts with book info and post URLs
@@ -934,9 +935,12 @@ def get_ranked_books_by_bt(top=None, genre=None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Build query with optional genre filter
+    # Build query with optional filters
     query = '''
-        SELECT b.id, b.title, b.author, b.bt_score, b.sentiment_score, b.genre
+        SELECT b.id, b.title, b.author, b.bt_score, b.sentiment_score, b.genre,
+               (SELECT COUNT(*) FROM comparisons c
+                JOIN book_mentions bm ON (c.mention_a_id = bm.id OR c.mention_b_id = bm.id)
+                WHERE bm.book_id = b.id) as comparison_count
         FROM books b
         WHERE b.bt_score IS NOT NULL
     '''
@@ -945,6 +949,12 @@ def get_ranked_books_by_bt(top=None, genre=None):
     if genre:
         query += ' AND b.genre = ?'
         params.append(genre)
+
+    if min_comparisons:
+        query += ''' AND (SELECT COUNT(*) FROM comparisons c
+                         JOIN book_mentions bm ON (c.mention_a_id = bm.id OR c.mention_b_id = bm.id)
+                         WHERE bm.book_id = b.id) >= ?'''
+        params.append(min_comparisons)
 
     query += ' ORDER BY b.bt_score DESC'
 
@@ -963,7 +973,7 @@ def get_ranked_books_by_bt(top=None, genre=None):
 
     # Get post URLs for each book
     results = []
-    for book_id, title, author, bt_score, sentiment_score, book_genre in books:
+    for book_id, title, author, bt_score, sentiment_score, book_genre, comparison_count in books:
         cursor.execute('''
             SELECT DISTINCT p.url
             FROM book_mentions bm
@@ -980,7 +990,8 @@ def get_ranked_books_by_bt(top=None, genre=None):
             'bt_score': bt_score,
             'sentiment_score': sentiment_score,
             'genre': book_genre,
-            'post_urls': post_urls
+            'post_urls': post_urls,
+            'comparison_count': comparison_count
         })
 
     conn.close()

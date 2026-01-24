@@ -94,6 +94,38 @@ def log_parse_failure_to_debug_file(post_title, post_url, raw_response):
         f.write(f"{'='*80}\n")
 
 
+def log_comparison_failure_to_debug_file(title_a, title_b, prompt, raw_response):
+    """Log full details to debug file when comparison response cannot be parsed.
+
+    Writes to debug_comparison_failures.log for diagnosis. This helps analyze
+    patterns in unparseable responses and improve parsing logic.
+
+    Args:
+        title_a: Title of book A in the comparison
+        title_b: Title of book B in the comparison
+        prompt: The full prompt sent to the LLM
+        raw_response: The full raw LLM response text
+    """
+    import os
+    from datetime import datetime
+
+    # Write to debug file in same directory as this script
+    debug_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug_comparison_failures.log')
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    with open(debug_file, 'a', encoding='utf-8') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"Timestamp: {timestamp}\n")
+        f.write(f"Book A: {title_a or 'Unknown'}\n")
+        f.write(f"Book B: {title_b or 'Unknown'}\n")
+        f.write(f"{'='*80}\n")
+        f.write(f"Full Prompt:\n{prompt}\n")
+        f.write(f"\n{'-'*40}\n")
+        f.write(f"Full LLM Response:\n{raw_response}\n")
+        f.write(f"{'='*80}\n")
+
+
 def extract_italicized_titles(content_html):
     """Extract potential book titles from italicized text (<em> or <i> tags)."""
     if not content_html:
@@ -1842,6 +1874,8 @@ def compare_pair_with_llm(mention_a, mention_b, model=None, debug=False, provide
 
     prompt = f"""Compare these two book reviews from Tyler Cowen's blog. Which review expresses a MORE POSITIVE sentiment toward its book?
 
+IMPORTANT: Each review text may mention MULTIPLE books. You must ONLY consider what Tyler says about the SPECIFIC book named in the heading. Ignore any sentiment about other books mentioned in the same post.
+
 REVIEW A - About "{prompt_title_a}":
 {prompt_text_a}
 
@@ -1853,10 +1887,11 @@ You MUST choose either A or B. There is no tie option. Even if the difference is
 - Personal endorsements ("I loved", "one of my favorites" vs neutral descriptions)
 - Recommendation strength ("highly recommend" vs "might enjoy")
 - Criticism level (any negatives mentioned vs pure praise)
+- A book merely being listed with no commentary is NEUTRAL/NEGATIVE compared to one with explicit praise
 
 Think step by step:
-1. Read Review A carefully. What sentiment does it express? (1 sentence)
-2. Read Review B carefully. What sentiment does it express? (1 sentence)
+1. Find the specific sentences about "{prompt_title_a}" in Review A. What sentiment do they express? (1 sentence)
+2. Find the specific sentences about "{prompt_title_b}" in Review B. What sentiment do they express? (1 sentence)
 3. Compare the two sentiments. Which is more positive?
 4. Your final answer (just the letter): A or B"""
 
@@ -1942,6 +1977,8 @@ Think step by step:
         else:
             # Could not parse answer - skip this comparison rather than add noise
             print(f"Warning: Could not parse A/B from comparison response, skipping. Response: {response_text[:200]}...")
+            # Log full details to debug file for analysis
+            log_comparison_failure_to_debug_file(title_a, title_b, prompt, response_text)
             debug_info['parsed_result'] = 'SKIPPED (unparseable)'
             result = None
 
