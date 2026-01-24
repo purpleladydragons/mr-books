@@ -86,6 +86,21 @@ def cmd_status(args):
     get_scrape_status()
 
 
+def cmd_label_genres(args):
+    """Handle the label-genres subcommand."""
+    from analyzer import run_genre_labeling
+    from db import init_db
+
+    init_db()
+    run_genre_labeling(
+        model=args.model if args.model else None,
+        workers=args.workers,
+        reset=args.reset,
+        provider=args.provider,
+        api_key=args.api_key
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Marginal Revolution Book Reviews Scraper and Analyzer'
@@ -260,6 +275,43 @@ def main():
         help='Write debug logs to a file instead of terminal (e.g., --debug-log comparisons.log)'
     )
     rank_parser.set_defaults(func=cmd_rank)
+
+    # label-genres subcommand
+    label_genres_parser = subparsers.add_parser(
+        'label-genres',
+        help='Label books with genres using LLM'
+    )
+    label_genres_parser.add_argument(
+        '--provider',
+        type=str,
+        choices=['ollama', 'gemini'],
+        default='ollama',
+        help='LLM provider to use (default: ollama)'
+    )
+    label_genres_parser.add_argument(
+        '--api-key',
+        type=str,
+        default=None,
+        help='API key for Gemini (or set GEMINI_API_KEY environment variable)'
+    )
+    label_genres_parser.add_argument(
+        '--model',
+        type=str,
+        default=None,
+        help='Model to use (default: llama3.2:3b for ollama, gemini-2.5-flash for gemini)'
+    )
+    label_genres_parser.add_argument(
+        '--workers',
+        type=int,
+        default=5,
+        help='Number of concurrent workers for LLM calls (default: 5)'
+    )
+    label_genres_parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Clear existing genre labels and reprocess all books'
+    )
+    label_genres_parser.set_defaults(func=cmd_label_genres)
 
     args = parser.parse_args()
 

@@ -2802,3 +2802,302 @@ def _fit_and_update_scores(mention_ids):
         print(f"Run 'python main.py rankings' to see the results.")
     else:
         print("No scores computed. Need more comparisons or valid data.")
+
+
+# ============================================================
+# Genre Labeling Functions
+# ============================================================
+
+def label_book_genre(book_title, context_text, model=None, provider='ollama', api_key=None):
+    """Use LLM to determine genres for a single book.
+
+    Args:
+        book_title: The book's title
+        context_text: Combined context from all mentions (post content)
+        model: The model to use (defaults based on provider)
+        provider: LLM provider ('ollama' or 'gemini')
+        api_key: API key for Gemini
+
+    Returns:
+        List of genre strings, or empty list if genre is unclear
+    """
+    import json
+
+    if not book_title:
+        return []
+
+    # Truncate context if too long
+    max_context = 6000
+    if context_text and len(context_text) > max_context:
+        context_text = context_text[:max_context] + "..."
+
+    prompt = f"""You are categorizing books mentioned on Tyler Cowen's economics blog "Marginal Revolution".
+
+Book title: "{book_title}"
+
+Context from blog post(s) where this book was mentioned:
+{context_text or "(No context available)"}
+
+Based on the book title and context, assign genres to this book. You can assign MULTIPLE genres per book.
+
+Guidelines:
+- Use SPECIFIC genres where possible (e.g., "Chinese history" not just "history", "science fiction" not just "fiction")
+- Include BOTH general and specific genres where appropriate (e.g., a Napoleon biography could get "biography", "history", AND "European history")
+- If the book's genre is unclear or too niche to categorize, return an empty array []
+- Common genres include: biography, memoir, history (and specific: American history, European history, Chinese history, military history, etc.), economics, fiction (and specific: science fiction, literary fiction, mystery, thriller, etc.), philosophy, science (and specific: physics, biology, psychology, etc.), politics, business, self-help, technology, art, music, religion, travel, cooking, sports
+
+Return ONLY a valid JSON array of genre strings. Do NOT use markdown formatting.
+
+Examples:
+- For a Napoleon biography: ["biography", "history", "European history", "military history"]
+- For a Chinese economics book: ["economics", "China", "Asian studies"]
+- For a science fiction novel: ["fiction", "science fiction"]
+- For an unclear/niche book: []
+
+Your response (JSON array only):"""
+
+    try:
+        response = call_llm(prompt, provider=provider, model=model, api_key=api_key, temperature=0.1)
+
+        # Clean and parse the response
+        response = response.strip()
+        response = clean_markdown_from_json(response)
+
+        # Try to extract JSON array from response
+        try:
+            genres = json.loads(response)
+            if isinstance(genres, list):
+                # Filter to strings only and normalize
+                return [str(g).strip().lower() for g in genres if g and str(g).strip()]
+        except json.JSONDecodeError:
+            # Try to find array in response
+            match = re.search(r'\[.*?\]', response, re.DOTALL)
+            if match:
+                try:
+                    genres = json.loads(match.group())
+                    if isinstance(genres, list):
+                        return [str(g).strip().lower() for g in genres if g and str(g).strip()]
+                except json.JSONDecodeError:
+                    pass
+
+        # If parsing fails, log and return empty
+        print(f"  Warning: Could not parse genres for '{book_title}': {response[:200]}")
+        return []
+
+    except ConnectionError as e:
+        raise  # Re-raise connection errors
+    except Exception as e:
+        print(f"  Warning: Error labeling genres for '{book_title}': {e}")
+        return []
+
+
+def label_genres_parallel(books, model=None, workers=5, rate_limit=100.0, provider='ollama', api_key=None):
+    """Label genres for multiple books using parallel LLM calls.
+
+    Args:
+        books: List of tuples (book_id, book_title, context_text)
+        model: The model to use
+        workers: Number of concurrent workers
+        rate_limit: Max requests per second
+        provider: LLM provider
+        api_key: API key for Gemini
+
+    Returns:
+        Tuple: (books_labeled, books_skipped, errors)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    import time
+
+    from db import add_book_genres
+
+    total = len(books)
+    if total == 0:
+        return 0, 0, 0
+
+    print(f"Labeling genres for {total} books with {workers} workers using {provider}...")
+
+    # Rate limiter
+    class RateLimiter:
+        def __init__(self, rate):
+            self.min_interval = 1.0 / rate
+            self.last_time = 0
+            self.lock = threading.Lock()
+
+        def wait(self):
+            with self.lock:
+                now = time.time()
+                elapsed = now - self.last_time
+                if elapsed < self.min_interval:
+                    time.sleep(self.min_interval - elapsed)
+                self.last_time = time.time()
+
+    rate_limiter = RateLimiter(rate_limit)
+
+    def label_single_book(book):
+        """Worker function for labeling a single book."""
+        book_id, book_title, context_text = book
+        rate_limiter.wait()
+
+        try:
+            genres = label_book_genre(book_title, context_text, model=model, provider=provider, api_key=api_key)
+            return {
+                'book_id': book_id,
+                'book_title': book_title,
+                'genres': genres,
+                'error': None
+            }
+        except ConnectionError as e:
+            return {
+                'book_id': book_id,
+                'book_title': book_title,
+                'genres': [],
+                'error': f'connection_error: {e}'
+            }
+        except Exception as e:
+            return {
+                'book_id': book_id,
+                'book_title': book_title,
+                'genres': [],
+                'error': str(e)
+            }
+
+    books_labeled = 0
+    books_skipped = 0
+    errors = 0
+    completed = 0
+    connection_failed = False
+
+    # Process in batches
+    batch_size = 50
+    results_to_write = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_book = {executor.submit(label_single_book, book): book for book in books}
+
+        for future in as_completed(future_to_book):
+            completed += 1
+
+            try:
+                result = future.result()
+
+                if result['error']:
+                    if 'connection_error' in result['error']:
+                        error_msg = result['error'].replace('connection_error: ', '')
+                        print(f"\nLLM connection failed: {error_msg}. Stopping labeling.")
+                        connection_failed = True
+                        for f in future_to_book:
+                            f.cancel()
+                        break
+                    else:
+                        print(f"\n  Warning: Error processing book '{result['book_title']}': {result['error']}")
+                        errors += 1
+                else:
+                    results_to_write.append({
+                        'book_id': result['book_id'],
+                        'genres': result['genres']
+                    })
+
+            except Exception as e:
+                errors += 1
+
+            # Write to DB periodically and show progress
+            if len(results_to_write) >= batch_size or completed == total:
+                for r in results_to_write:
+                    if r['genres']:
+                        add_book_genres(r['book_id'], r['genres'])
+                        books_labeled += 1
+                    else:
+                        books_skipped += 1
+                results_to_write = []
+
+                # Progress update
+                print(f"  Progress: {completed}/{total} books processed, {books_labeled} labeled, {books_skipped} skipped")
+
+    return books_labeled, books_skipped, errors
+
+
+def run_genre_labeling(model=None, workers=5, reset=False, provider='ollama', api_key=None):
+    """Main function to run genre labeling on all books.
+
+    Args:
+        model: The model to use
+        workers: Number of concurrent workers
+        reset: If True, clear existing genre labels and reprocess all books
+        provider: LLM provider
+        api_key: API key for Gemini
+    """
+    from db import (
+        get_books_count,
+        get_books_for_genre_labeling,
+        get_all_books_for_genre_labeling,
+        clear_book_genres,
+        get_genre_labeling_stats
+    )
+
+    # Check if books exist
+    book_count = get_books_count()
+    if book_count == 0:
+        print("Error: No books found in database.")
+        print("Run 'python main.py analyze --extract-only --provider <provider>' first to extract books.")
+        return
+
+    print(f"Found {book_count} books in database.")
+
+    # Check provider availability
+    print(f"\nChecking {provider} availability...")
+    try:
+        check_provider_available(provider, model, api_key)
+        model_display = model or ('llama3.2:3b' if provider == 'ollama' else 'gemini-2.5-flash')
+        print(f"{provider.capitalize()} is available with model '{model_display}'.")
+    except ConnectionError as e:
+        print(f"\nAborting: Cannot proceed when {provider} is not available.")
+        print(f"Error: {e}")
+        return
+
+    # Handle reset flag
+    if reset:
+        print("\n--reset flag set: Clearing existing genre labels...")
+        clear_book_genres()
+        books = get_all_books_for_genre_labeling()
+    else:
+        books = get_books_for_genre_labeling()
+
+    to_process = len(books)
+    if to_process == 0:
+        print("\nAll books already have genre labels.")
+        print("Use --reset to clear labels and reprocess all books.")
+
+        # Show current stats
+        stats = get_genre_labeling_stats()
+        print(f"\nCurrent stats:")
+        print(f"  Books with genres: {stats['books_with_genres']}/{stats['total_books']}")
+        print(f"  Total genre associations: {stats['total_associations']}")
+        print(f"  Unique genres used: {stats['unique_genres']}")
+        return
+
+    print(f"\n{to_process} books to process.")
+
+    # Run labeling
+    books_labeled, books_skipped, errors = label_genres_parallel(
+        books,
+        model=model,
+        workers=workers,
+        provider=provider,
+        api_key=api_key
+    )
+
+    # Final summary
+    print(f"\n{'='*50}")
+    print("Genre Labeling Complete")
+    print(f"{'='*50}")
+    print(f"Books labeled: {books_labeled}")
+    print(f"Books skipped (unclear genre): {books_skipped}")
+    print(f"Errors: {errors}")
+
+    # Show final stats
+    stats = get_genre_labeling_stats()
+    print(f"\nFinal stats:")
+    print(f"  Books with genres: {stats['books_with_genres']}/{stats['total_books']}")
+    print(f"  Total genre associations: {stats['total_associations']}")
+    print(f"  Unique genres used: {stats['unique_genres']}")

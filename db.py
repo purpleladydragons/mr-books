@@ -55,6 +55,9 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Enable foreign keys for CASCADE support
+    cursor.execute('PRAGMA foreign_keys = ON')
+
     # Create posts table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS posts (
@@ -135,6 +138,26 @@ def init_db():
     columns = [col[1] for col in cursor.fetchall()]
     if 'bt_score' not in columns:
         cursor.execute('ALTER TABLE books ADD COLUMN bt_score REAL')
+
+    # Create genres table for genre labels
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS genres (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    ''')
+
+    # Create book_genres junction table with CASCADE delete
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS book_genres (
+            book_id INTEGER NOT NULL,
+            genre_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (book_id, genre_id),
+            FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+            FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -1110,3 +1133,173 @@ def reset_extraction_cache():
     conn.close()
 
     print(f"Reset books_extracted_at for {affected} posts.")
+
+
+# ============================================================
+# Genre Labeling Functions
+# ============================================================
+
+def get_books_for_genre_labeling():
+    """Get all books that need genre labels (have no genres assigned).
+
+    Returns:
+        List of tuples: (book_id, book_title, context_text)
+        context_text is the combined context from all book_mentions
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get books that have no genres assigned yet
+    # Join with book_mentions to get context_text for genre inference
+    cursor.execute('''
+        SELECT b.id, b.title, GROUP_CONCAT(bm.context_text, '\n\n---\n\n')
+        FROM books b
+        LEFT JOIN book_mentions bm ON b.id = bm.book_id
+        WHERE b.id NOT IN (SELECT DISTINCT book_id FROM book_genres)
+        GROUP BY b.id
+        ORDER BY b.id
+    ''')
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+
+def get_all_books_for_genre_labeling():
+    """Get ALL books for genre labeling (ignoring existing labels).
+
+    Used with --reset flag to reprocess all books.
+
+    Returns:
+        List of tuples: (book_id, book_title, context_text)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT b.id, b.title, GROUP_CONCAT(bm.context_text, '\n\n---\n\n')
+        FROM books b
+        LEFT JOIN book_mentions bm ON b.id = bm.book_id
+        GROUP BY b.id
+        ORDER BY b.id
+    ''')
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+
+def get_books_count():
+    """Get total number of books in database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM books')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_or_create_genre(genre_name):
+    """Get genre ID by name, or create if doesn't exist.
+
+    Args:
+        genre_name: Name of the genre
+
+    Returns:
+        The genre ID
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Try to get existing genre
+    cursor.execute('SELECT id FROM genres WHERE name = ?', (genre_name,))
+    result = cursor.fetchone()
+
+    if result:
+        conn.close()
+        return result[0]
+
+    # Create new genre
+    cursor.execute('INSERT INTO genres (name) VALUES (?)', (genre_name,))
+    genre_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return genre_id
+
+
+def add_book_genres(book_id, genre_names):
+    """Add genres to a book.
+
+    Args:
+        book_id: The book's ID
+        genre_names: List of genre name strings
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    for genre_name in genre_names:
+        # Get or create the genre
+        cursor.execute('SELECT id FROM genres WHERE name = ?', (genre_name,))
+        result = cursor.fetchone()
+        if result:
+            genre_id = result[0]
+        else:
+            cursor.execute('INSERT INTO genres (name) VALUES (?)', (genre_name,))
+            genre_id = cursor.lastrowid
+
+        # Link book to genre (ignore if already exists)
+        cursor.execute('''
+            INSERT OR IGNORE INTO book_genres (book_id, genre_id)
+            VALUES (?, ?)
+        ''', (book_id, genre_id))
+
+    conn.commit()
+    conn.close()
+
+
+def clear_book_genres():
+    """Clear all book_genres entries for fresh genre labeling.
+
+    Does NOT delete the genres themselves, just the associations.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM book_genres')
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    print(f"Cleared {affected} book-genre associations.")
+
+
+def get_genre_labeling_stats():
+    """Get statistics about genre labeling progress.
+
+    Returns:
+        Dict with stats
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Total books
+    cursor.execute('SELECT COUNT(*) FROM books')
+    total_books = cursor.fetchone()[0]
+
+    # Books with at least one genre
+    cursor.execute('SELECT COUNT(DISTINCT book_id) FROM book_genres')
+    books_with_genres = cursor.fetchone()[0]
+
+    # Total genre associations
+    cursor.execute('SELECT COUNT(*) FROM book_genres')
+    total_associations = cursor.fetchone()[0]
+
+    # Unique genres used
+    cursor.execute('SELECT COUNT(DISTINCT genre_id) FROM book_genres')
+    unique_genres = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        'total_books': total_books,
+        'books_with_genres': books_with_genres,
+        'books_without_genres': total_books - books_with_genres,
+        'total_associations': total_associations,
+        'unique_genres': unique_genres
+    }
