@@ -121,11 +121,21 @@ def init_db():
             mention_b_id INTEGER NOT NULL,
             winner_id INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            manually_corrected INTEGER DEFAULT 0,
+            corrected_at TEXT,
             FOREIGN KEY (mention_a_id) REFERENCES book_mentions(id),
             FOREIGN KEY (mention_b_id) REFERENCES book_mentions(id),
             FOREIGN KEY (winner_id) REFERENCES book_mentions(id)
         )
     ''')
+
+    # Add manually_corrected and corrected_at columns if they don't exist
+    cursor.execute("PRAGMA table_info(comparisons)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'manually_corrected' not in columns:
+        cursor.execute('ALTER TABLE comparisons ADD COLUMN manually_corrected INTEGER DEFAULT 0')
+    if 'corrected_at' not in columns:
+        cursor.execute('ALTER TABLE comparisons ADD COLUMN corrected_at TEXT')
 
     # Add bt_score column to book_mentions if it doesn't exist
     cursor.execute("PRAGMA table_info(book_mentions)")
@@ -1302,4 +1312,124 @@ def get_genre_labeling_stats():
         'books_without_genres': total_books - books_with_genres,
         'total_associations': total_associations,
         'unique_genres': unique_genres
+    }
+
+
+# ============================================================
+# Review UI Functions
+# ============================================================
+
+def get_comparison_for_review(comparison_id):
+    """Get a comparison with full details for review UI.
+
+    Args:
+        comparison_id: The comparison ID to fetch
+
+    Returns:
+        Dict with comparison details including book titles and context
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT
+            c.id,
+            c.mention_a_id,
+            c.mention_b_id,
+            c.winner_id,
+            c.created_at,
+            c.manually_corrected,
+            c.corrected_at,
+            ba.title as book_a_title,
+            bb.title as book_b_title,
+            bma.context_text as context_a,
+            bmb.context_text as context_b
+        FROM comparisons c
+        JOIN book_mentions bma ON c.mention_a_id = bma.id
+        JOIN book_mentions bmb ON c.mention_b_id = bmb.id
+        JOIN books ba ON bma.book_id = ba.id
+        JOIN books bb ON bmb.book_id = bb.id
+        WHERE c.id = ?
+    ''', (comparison_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        'id': row[0],
+        'mention_a_id': row[1],
+        'mention_b_id': row[2],
+        'winner_id': row[3],
+        'created_at': row[4],
+        'manually_corrected': bool(row[5]),
+        'corrected_at': row[6],
+        'book_a_title': row[7],
+        'book_b_title': row[8],
+        'context_a': row[9],
+        'context_b': row[10]
+    }
+
+
+def get_comparison_ids():
+    """Get all comparison IDs in order.
+
+    Returns:
+        List of comparison IDs sorted by id
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM comparisons ORDER BY id')
+    ids = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return ids
+
+
+def correct_comparison(comparison_id, new_winner_id):
+    """Correct a comparison's winner and mark as manually corrected.
+
+    Args:
+        comparison_id: The comparison to correct
+        new_winner_id: The new winner mention ID
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE comparisons
+        SET winner_id = ?,
+            manually_corrected = 1,
+            corrected_at = datetime('now')
+        WHERE id = ?
+    ''', (new_winner_id, comparison_id))
+    conn.commit()
+    conn.close()
+
+
+def get_review_stats():
+    """Get statistics for the review UI analytics section.
+
+    Returns:
+        Dict with total comparisons, corrected count, and correction rate
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Total comparisons
+    cursor.execute('SELECT COUNT(*) FROM comparisons')
+    total = cursor.fetchone()[0]
+
+    # Manually corrected count
+    cursor.execute('SELECT COUNT(*) FROM comparisons WHERE manually_corrected = 1')
+    corrected = cursor.fetchone()[0]
+
+    conn.close()
+
+    correction_rate = (corrected / total * 100) if total > 0 else 0
+
+    return {
+        'total_comparisons': total,
+        'manually_corrected': corrected,
+        'correction_rate': correction_rate
     }

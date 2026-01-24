@@ -8,3 +8,4 @@ rapidfuzz
 choix
 google-genai
 pytest
+flask

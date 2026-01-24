@@ -101,6 +101,13 @@ def cmd_label_genres(args):
     )
 
 
+def cmd_review_ui(args):
+    """Handle the review-ui subcommand."""
+    from review_ui import run_review_ui
+
+    run_review_ui(port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Marginal Revolution Book Reviews Scraper and Analyzer'
@@ -312,6 +319,19 @@ def main():
         help='Clear existing genre labels and reprocess all books'
     )
     label_genres_parser.set_defaults(func=cmd_label_genres)
+
+    # review-ui subcommand
+    review_ui_parser = subparsers.add_parser(
+        'review-ui',
+        help='Launch web UI for reviewing and correcting comparisons'
+    )
+    review_ui_parser.add_argument(
+        '--port',
+        type=int,
+        default=5000,
+        help='Port to run the web server on (default: 5000)'
+    )
+    review_ui_parser.set_defaults(func=cmd_review_ui)
 
     args = parser.parse_args()
 
