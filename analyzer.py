@@ -2279,6 +2279,51 @@ def fit_bradley_terry(comparisons, mention_ids):
         return {}
 
 
+def refit_bt_model():
+    """Refit Bradley-Terry model on existing comparisons without making new LLM calls.
+
+    Useful after manually correcting comparisons in the review UI.
+    """
+    from db import (
+        get_mentions_for_bt,
+        get_all_comparisons,
+        get_comparison_count,
+        update_mention_bt_scores_batch,
+        update_book_bt_scores
+    )
+
+    print("=== REFIT ONLY MODE ===")
+    print("Refitting Bradley-Terry model on existing comparisons...\n")
+
+    # Get all mentions and comparisons
+    mention_ids = get_mentions_for_bt()
+    if not mention_ids:
+        print("No mentions found for Bradley-Terry ranking.")
+        return
+
+    all_comparisons = get_all_comparisons()
+    comparison_count = get_comparison_count()
+
+    print(f"Found {len(mention_ids)} mentions and {comparison_count} comparisons.")
+
+    if not all_comparisons:
+        print("No comparisons found. Run 'python main.py rank' first to generate comparisons.")
+        return
+
+    # Fit Bradley-Terry model
+    print("\nFitting Bradley-Terry model...")
+    scores = fit_bradley_terry(all_comparisons, mention_ids)
+
+    if scores:
+        print(f"Updating Bradley-Terry scores for {len(scores)} mentions...")
+        update_mention_bt_scores_batch(scores)
+        update_book_bt_scores()
+        print("\nDone! Bradley-Terry scores updated.")
+        print("Run 'python main.py rankings' to see the updated rankings.")
+    else:
+        print("Failed to fit Bradley-Terry model.")
+
+
 def run_pairwise_ranking(n_comparisons=10000, model=None, workers=5, adaptive=False, top_k=None,
                          debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run pairwise comparison ranking process.
@@ -2347,12 +2392,12 @@ def run_pairwise_ranking(n_comparisons=10000, model=None, workers=5, adaptive=Fa
         # Run top-k focused sampling with early stopping
         print(f"\n=== TOP-K FOCUSED MODE ===")
         print(f"Focusing on identifying top {top_k} items.")
-        print(f"Will refit BT model every 500 comparisons and stop early if top-k stabilizes.")
+        print(f"Will refit BT model every 5000 comparisons and stop early if top-k stabilizes.")
         _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, debug=debug, debug_log=debug_log, provider=provider, api_key=api_key)
     elif adaptive:
         # Run adaptive sampling with periodic refitting
         print(f"\n=== ADAPTIVE SAMPLING MODE ===")
-        print(f"Will refit BT model every 1000 comparisons to update uncertainty estimates.")
+        print(f"Will refit BT model every 5000 comparisons to update uncertainty estimates.")
         _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, debug=debug, debug_log=debug_log, provider=provider, api_key=api_key)
     else:
         # Original random sampling approach
@@ -2381,7 +2426,7 @@ def run_pairwise_ranking(n_comparisons=10000, model=None, workers=5, adaptive=Fa
             return
 
 
-def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=1000, min_coverage=5,
+def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_interval=5000, min_coverage=5,
                           debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run adaptive ranking with periodic BT model refitting.
 
@@ -2553,7 +2598,7 @@ def _run_adaptive_ranking(mention_ids, n_comparisons, model, workers, refit_inte
     print(f"Run 'python main.py rankings' to see the results.")
 
 
-def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=500, stable_threshold=3,
+def _run_topk_ranking(mention_ids, n_comparisons, model, workers, top_k, refit_interval=5000, stable_threshold=3,
                       debug=False, debug_log=None, provider='ollama', api_key=None):
     """Run top-k focused ranking with early stopping on stability.
 
@@ -2865,10 +2910,15 @@ Your response (JSON array only):"""
 
         # Try to extract JSON array from response
         try:
-            genres = json.loads(response)
-            if isinstance(genres, list):
-                # Filter to strings only and normalize
-                return [str(g).strip().lower() for g in genres if g and str(g).strip()]
+            parsed = json.loads(response)
+            # Handle direct array: ["genre1", "genre2"]
+            if isinstance(parsed, list):
+                return [str(g).strip().lower() for g in parsed if g and str(g).strip()]
+            # Handle object with "genres" key: {"genres": ["genre1", "genre2"]}
+            if isinstance(parsed, dict) and 'genres' in parsed:
+                genres = parsed['genres']
+                if isinstance(genres, list):
+                    return [str(g).strip().lower() for g in genres if g and str(g).strip()]
         except json.JSONDecodeError:
             # Try to find array in response
             match = re.search(r'\[.*?\]', response, re.DOTALL)

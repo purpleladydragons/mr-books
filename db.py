@@ -148,6 +148,8 @@ def init_db():
     columns = [col[1] for col in cursor.fetchall()]
     if 'bt_score' not in columns:
         cursor.execute('ALTER TABLE books ADD COLUMN bt_score REAL')
+    if 'comparison_count' not in columns:
+        cursor.execute('ALTER TABLE books ADD COLUMN comparison_count INTEGER DEFAULT 0')
 
     # Create genres table for genre labels
     cursor.execute('''
@@ -167,6 +169,38 @@ def init_db():
             FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
             FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
         )
+    ''')
+
+    # Create book_embeddings table for semantic search
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS book_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            book_id INTEGER NOT NULL UNIQUE,
+            embedding BLOB NOT NULL,
+            text_hash TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_book_embeddings_book_id
+        ON book_embeddings(book_id)
+    ''')
+
+    # Performance indexes for comparison count queries
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_comparisons_mention_a
+        ON comparisons(mention_a_id)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_comparisons_mention_b
+        ON comparisons(mention_b_id)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_book_mentions_book_id
+        ON book_mentions(book_id)
     ''')
 
     conn.commit()
@@ -907,7 +941,7 @@ def update_mention_bt_scores_batch(scores):
     """Update Bradley-Terry scores for multiple mentions in a single transaction.
 
     Args:
-        scores: List of tuples (mention_id, bt_score)
+        scores: Dict mapping mention_id to bt_score
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -915,7 +949,7 @@ def update_mention_bt_scores_batch(scores):
         UPDATE book_mentions
         SET bt_score = ?
         WHERE id = ?
-    ''', [(score, mid) for mid, score in scores])
+    ''', [(score, mid) for mid, score in scores.items()])
     conn.commit()
     conn.close()
 
@@ -947,6 +981,29 @@ def update_book_bt_scores():
         WHERE id IN (
             SELECT DISTINCT book_id FROM book_mentions
             WHERE bt_score IS NOT NULL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+
+def update_book_comparison_counts():
+    """Update comparison_count for all books.
+
+    Counts the number of comparisons each book has participated in
+    (through its mentions) and stores in books.comparison_count.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE books
+        SET comparison_count = (
+            SELECT COUNT(DISTINCT c.id)
+            FROM comparisons c
+            JOIN book_mentions bm ON (c.mention_a_id = bm.id OR c.mention_b_id = bm.id)
+            WHERE bm.book_id = books.id
         )
     ''')
 
@@ -1433,3 +1490,222 @@ def get_review_stats():
         'manually_corrected': corrected,
         'correction_rate': correction_rate
     }
+
+
+# ==================== Post URL Functions ====================
+
+def get_post_urls_for_book(book_id):
+    """Get all post URLs where a book was mentioned.
+
+    Args:
+        book_id: The book ID
+
+    Returns:
+        List of post URLs
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT DISTINCT p.url
+        FROM book_mentions bm
+        JOIN posts p ON bm.post_id = p.id
+        WHERE bm.book_id = ?
+        ORDER BY p.date_published DESC
+    ''', (book_id,))
+
+    urls = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return urls
+
+
+# ==================== Embedding Functions ====================
+
+def get_books_for_embedding():
+    """Get all books with their combined context text for embedding.
+
+    Returns:
+        List of tuples (book_id, title, author, combined_context_text)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT b.id, b.title, b.author,
+               GROUP_CONCAT(bm.context_text, ' ') as combined_context
+        FROM books b
+        LEFT JOIN book_mentions bm ON b.id = bm.book_id
+        GROUP BY b.id
+    ''')
+
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
+def get_existing_embeddings(model_name):
+    """Get existing embeddings for cache checking.
+
+    Args:
+        model_name: The model name to filter by
+
+    Returns:
+        Dict mapping book_id to text_hash
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT book_id, text_hash
+        FROM book_embeddings
+        WHERE model_name = ?
+    ''', (model_name,))
+
+    results = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return results
+
+
+def store_embedding(book_id, embedding_bytes, text_hash, model_name):
+    """Store an embedding for a book.
+
+    Args:
+        book_id: The book ID
+        embedding_bytes: The embedding as bytes (numpy tobytes())
+        text_hash: SHA256 hash of the embedded text
+        model_name: The model used to generate the embedding
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        INSERT OR REPLACE INTO book_embeddings (book_id, embedding, text_hash, model_name, created_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (book_id, embedding_bytes, text_hash, model_name))
+
+    conn.commit()
+    conn.close()
+
+
+def store_embeddings_batch(embeddings_data):
+    """Store multiple embeddings in a single transaction.
+
+    Args:
+        embeddings_data: List of tuples (book_id, embedding_bytes, text_hash, model_name)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.executemany('''
+        INSERT OR REPLACE INTO book_embeddings (book_id, embedding, text_hash, model_name, created_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', embeddings_data)
+
+    conn.commit()
+    conn.close()
+
+
+def load_all_embeddings(model_name):
+    """Load all book embeddings for search.
+
+    Args:
+        model_name: The model name to filter by
+
+    Returns:
+        List of tuples (book_id, embedding_bytes, title, author, bt_score)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT be.book_id, be.embedding, b.title, b.author, b.bt_score
+        FROM book_embeddings be
+        JOIN books b ON be.book_id = b.id
+        WHERE be.model_name = ?
+    ''', (model_name,))
+
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
+def load_embeddings_with_genre(model_name, genre=None, min_bt_score=None):
+    """Load book embeddings with optional genre and score filters.
+
+    Args:
+        model_name: The model name to filter by
+        genre: Optional genre name to filter by
+        min_bt_score: Optional minimum BT score threshold
+
+    Returns:
+        List of tuples (book_id, embedding_bytes, title, author, bt_score)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = '''
+        SELECT be.book_id, be.embedding, b.title, b.author, b.bt_score
+        FROM book_embeddings be
+        JOIN books b ON be.book_id = b.id
+        WHERE be.model_name = ?
+    '''
+    params = [model_name]
+
+    if genre:
+        query += '''
+            AND b.id IN (
+                SELECT bg.book_id FROM book_genres bg
+                JOIN genres g ON bg.genre_id = g.id
+                WHERE LOWER(g.name) = LOWER(?)
+            )
+        '''
+        params.append(genre)
+
+    if min_bt_score is not None:
+        query += ' AND b.bt_score >= ?'
+        params.append(min_bt_score)
+
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
+def get_embedding_count(model_name):
+    """Get the count of embeddings for a model.
+
+    Args:
+        model_name: The model name to filter by
+
+    Returns:
+        Integer count
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT COUNT(*) FROM book_embeddings WHERE model_name = ?
+    ''', (model_name,))
+
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def clear_embeddings(model_name=None):
+    """Clear embeddings from the database.
+
+    Args:
+        model_name: If provided, only clear embeddings for this model.
+                   If None, clear all embeddings.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if model_name:
+        cursor.execute('DELETE FROM book_embeddings WHERE model_name = ?', (model_name,))
+    else:
+        cursor.execute('DELETE FROM book_embeddings')
+
+    conn.commit()
+    conn.close()
