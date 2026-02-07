@@ -9,3 +9,5 @@ choix
 google-genai
 pytest
 flask
+sentence-transformers
+gunicorn
