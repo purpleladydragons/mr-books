@@ -143,6 +143,70 @@ BASE_TEMPLATE = '''
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
+        /* Info tooltip */
+        .info-tooltip {
+            position: relative;
+            display: inline-block;
+            margin-left: 4px;
+            vertical-align: super;
+        }
+        .info-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            background: #e5e7eb;
+            color: #6b7280;
+            border-radius: 50%;
+            font-size: 10px;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-style: italic;
+            cursor: help;
+            transition: background 0.2s, color 0.2s;
+        }
+        .info-icon:hover {
+            background: #d1d5db;
+            color: #374151;
+        }
+        .tooltip-text {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 8px;
+            width: 360px;
+            padding: 16px 20px;
+            background: #1f2937;
+            color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1.6;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+            z-index: 1000;
+            transition: opacity 0.2s, visibility 0.2s;
+        }
+        .tooltip-text::before {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 16px;
+            border: 8px solid transparent;
+            border-bottom-color: #1f2937;
+        }
+        .info-tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        @media (max-width: 768px) {
+            .tooltip-text {
+                width: 280px;
+            }
+        }
         /* Form elements */
         select {
             padding: 10px 14px;
@@ -152,6 +216,8 @@ BASE_TEMPLATE = '''
             background: #fafafa;
             cursor: pointer;
             transition: border-color 0.2s;
+            max-width: 220px;
+            text-overflow: ellipsis;
         }
         select:focus {
             outline: none;
@@ -253,28 +319,88 @@ BASE_TEMPLATE = '''
         .book-item:last-child {
             border-bottom: none;
         }
+        .book-item-inner {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        .book-cover-link {
+            flex-shrink: 0;
+        }
+        .book-cover {
+            width: 60px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .book-cover:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        }
+        .book-cover-placeholder {
+            width: 60px;
+            height: 90px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            transition: transform 0.2s;
+        }
+        .book-cover-placeholder:hover {
+            transform: scale(1.05);
+        }
+        .book-cover-placeholder span {
+            color: white;
+            font-size: 24px;
+            font-family: 'Libre Baskerville', Georgia, serif;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .book-details {
+            flex: 1;
+            min-width: 0;
+        }
+        .book-header {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
         .book-rank {
-            display: inline-block;
-            width: 36px;
             font-weight: 600;
             color: #9ca3af;
             font-size: 14px;
+            flex-shrink: 0;
+        }
+        .book-title-link {
+            text-decoration: none;
+        }
+        .book-title-link:hover .book-title {
+            color: #3b82f6;
         }
         .book-title {
             font-family: 'Libre Baskerville', Georgia, serif;
             font-weight: 400;
             color: #1f2937;
             font-size: 17px;
+            transition: color 0.2s;
         }
         .book-author {
             color: #6b7280;
             font-size: 14px;
             font-style: italic;
+            margin-top: 2px;
         }
         .book-meta {
             margin-top: 8px;
             font-size: 13px;
             color: #9ca3af;
+        }
+        .book-genres {
+            margin-top: 8px;
         }
         .book-score {
             display: inline-block;
@@ -408,7 +534,7 @@ BASE_TEMPLATE = '''
 '''
 
 RANKINGS_CONTENT = '''
-<h1 class="page-title">Book Rankings</h1>
+<h1 class="page-title">Book Rankings <span class="info-tooltip"><span class="info-icon">i</span><span class="tooltip-text">I scraped marginalrevolution.com/marginalrevolution/category/books. I used gemini-2.5-flash because it's affordable and llama is too slow on my macbook. I had it first extract book titles from posts. I then had it compare two books at a time to see which review expressed a stronger positive sentiment. There are roughly 8 million such comparisons to do for an exhaustive set, but I already racked up a decent bill on gemini with 2 million comparisons so I stopped there. Thus the rankings are roughly accurate but not necessarily extremely precise. You shouldn't necessarily interpret book #5 as being better than book #6, but moreso books #1-10 being better than books #10-20.</span></span></h1>
 <p class="page-subtitle">Tyler Cowen's favorites from Marginal Revolution</p>
 
 <div class="filters">
@@ -449,35 +575,54 @@ RANKINGS_CONTENT = '''
     {% if books %}
         {% for book in books %}
         <div class="book-item">
-            <span class="book-rank">{{ loop.index }}.</span>
-            <span class="book-title">{{ book.title }}</span>
-            {% if book.author %}
-            <span class="book-author">by {{ book.author }}</span>
-            {% endif %}
-            <div class="book-meta">
-                <span class="book-score">BT: {{ "%.2f"|format(book.bt_score) if book.bt_score is not none else 'N/A' }}</span>
-                <span class="comparison-badge">{{ book.comparison_count }} comparisons</span>
-            </div>
-            {% if book.genres %}
-            <div style="margin-top: 5px;">
-                {% for g in book.genres[:4] %}
-                <a href="/?genre={{ g }}" class="genre-tag">{{ g }}</a>
-                {% endfor %}
-                {% if book.genres|length > 4 %}
-                <span class="genre-tag" style="background: #f0f0f0; color: #888;">+{{ book.genres|length - 4 }} more</span>
+            <div class="book-item-inner">
+                {% if book.cover_url %}
+                <a href="{{ book.amazon_url }}" target="_blank" class="book-cover-link">
+                    <img src="{{ book.cover_url }}" alt="{{ book.title }}" class="book-cover" loading="lazy">
+                </a>
+                {% else %}
+                <a href="{{ book.amazon_url }}" target="_blank" class="book-cover-link">
+                    <div class="book-cover-placeholder">
+                        <span>{{ book.title[:1] }}</span>
+                    </div>
+                </a>
                 {% endif %}
+                <div class="book-details">
+                    <div class="book-header">
+                        <span class="book-rank">{{ loop.index }}.</span>
+                        <a href="{{ book.amazon_url }}" target="_blank" class="book-title-link">
+                            <span class="book-title">{{ book.title }}</span>
+                        </a>
+                    </div>
+                    {% if book.author %}
+                    <div class="book-author">by {{ book.author }}</div>
+                    {% endif %}
+                    <div class="book-meta">
+                        <span class="book-score">BT: {{ "%.2f"|format(book.bt_score) if book.bt_score is not none else 'N/A' }}</span>
+                        <span class="comparison-badge">{{ book.comparison_count }} comparisons</span>
+                    </div>
+                    {% if book.genres %}
+                    <div class="book-genres">
+                        {% for g in book.genres[:4] %}
+                        <a href="/?genre={{ g }}" class="genre-tag">{{ g }}</a>
+                        {% endfor %}
+                        {% if book.genres|length > 4 %}
+                        <span class="genre-tag" style="background: #f3f4f6; color: #9ca3af;">+{{ book.genres|length - 4 }}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if book.post_urls %}
+                    <div class="book-links">
+                        {% for url in book.post_urls[:2] %}
+                        <a href="{{ url }}" target="_blank">MR Post</a>
+                        {% endfor %}
+                        {% if book.post_urls|length > 2 %}
+                        <span style="color: #9ca3af;">+{{ book.post_urls|length - 2 }} more</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
             </div>
-            {% endif %}
-            {% if book.post_urls %}
-            <div class="book-links">
-                {% for url in book.post_urls[:3] %}
-                <a href="{{ url }}" target="_blank">{{ url|truncate(50) }}</a>
-                {% endfor %}
-                {% if book.post_urls|length > 3 %}
-                <span style="color: #888; font-size: 12px;">+{{ book.post_urls|length - 3 }} more</span>
-                {% endif %}
-            </div>
-            {% endif %}
         </div>
         {% endfor %}
     {% else %}
@@ -603,7 +748,7 @@ def rankings():
 
     # Build query using precomputed comparison_count column
     query = '''
-        SELECT b.id, b.title, b.author, b.bt_score, b.comparison_count
+        SELECT b.id, b.title, b.author, b.bt_score, b.comparison_count, b.cover_url
         FROM books b
         WHERE b.bt_score IS NOT NULL
     '''
@@ -634,7 +779,7 @@ def rankings():
 
     # Get post URLs and genres for each book
     books = []
-    for book_id, title, author, bt_score, comparison_count in rows:
+    for book_id, title, author, bt_score, comparison_count, cover_url in rows:
         cursor.execute('''
             SELECT DISTINCT p.url
             FROM book_mentions bm
@@ -652,6 +797,11 @@ def rankings():
         ''', (book_id,))
         book_genres = [row[0] for row in cursor.fetchall()]
 
+        # Generate Amazon search URL
+        import urllib.parse
+        amazon_query = f"{title} {author}" if author else title
+        amazon_url = f"https://www.amazon.com/s?k={urllib.parse.quote(amazon_query)}&i=stripbooks"
+
         books.append({
             'id': book_id,
             'title': title,
@@ -659,7 +809,9 @@ def rankings():
             'bt_score': bt_score,
             'comparison_count': comparison_count,
             'post_urls': post_urls,
-            'genres': book_genres
+            'genres': book_genres,
+            'cover_url': cover_url,
+            'amazon_url': amazon_url
         })
 
     conn.close()

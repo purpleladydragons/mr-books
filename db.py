@@ -150,6 +150,8 @@ def init_db():
         cursor.execute('ALTER TABLE books ADD COLUMN bt_score REAL')
     if 'comparison_count' not in columns:
         cursor.execute('ALTER TABLE books ADD COLUMN comparison_count INTEGER DEFAULT 0')
+    if 'cover_url' not in columns:
+        cursor.execute('ALTER TABLE books ADD COLUMN cover_url TEXT')
 
     # Create genres table for genre labels
     cursor.execute('''
@@ -1709,3 +1711,64 @@ def clear_embeddings(model_name=None):
 
     conn.commit()
     conn.close()
+
+
+# ==================== Book Cover Functions ====================
+
+def get_books_without_covers(limit=None):
+    """Get books that don't have cover URLs yet.
+
+    Args:
+        limit: Max number of books to return (default: all)
+
+    Returns:
+        List of tuples (book_id, title, author)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = '''
+        SELECT id, title, author FROM books
+        WHERE cover_url IS NULL
+        ORDER BY bt_score DESC NULLS LAST
+    '''
+    if limit:
+        query += f' LIMIT {limit}'
+
+    cursor.execute(query)
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+
+def update_book_cover(book_id, cover_url):
+    """Update the cover URL for a book.
+
+    Args:
+        book_id: The book's ID
+        cover_url: The cover image URL (or empty string if not found)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE books SET cover_url = ? WHERE id = ?
+    ''', (cover_url, book_id))
+    conn.commit()
+    conn.close()
+
+
+def get_book_cover(book_id):
+    """Get the cover URL for a book.
+
+    Args:
+        book_id: The book's ID
+
+    Returns:
+        Cover URL string or None
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT cover_url FROM books WHERE id = ?', (book_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
