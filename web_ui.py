@@ -190,6 +190,8 @@ BASE_TEMPLATE = '''
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
             z-index: 1000;
             transition: opacity 0.2s, visibility 0.2s;
+            overflow-wrap: break-word;
+            word-break: break-word;
         }
         .tooltip-text::before {
             content: '';
