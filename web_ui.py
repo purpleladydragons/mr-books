@@ -44,6 +44,7 @@ BASE_TEMPLATE = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MR Book Reviews{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -534,7 +535,7 @@ BASE_TEMPLATE = '''
 '''
 
 RANKINGS_CONTENT = '''
-<h1 class="page-title">Book Rankings <span class="info-tooltip"><span class="info-icon">i</span><span class="tooltip-text">I scraped marginalrevolution.com/marginalrevolution/category/books. I used gemini-2.5-flash because it's affordable and llama is too slow on my macbook. I had it first extract book titles from posts. I then had it compare two books at a time to see which review expressed a stronger positive sentiment. There are roughly 8 million such comparisons to do for an exhaustive set, but I already racked up a decent bill on gemini with 2 million comparisons so I stopped there. Thus the rankings are roughly accurate but not necessarily extremely precise. You shouldn't necessarily interpret book #5 as being better than book #6, but moreso books #1-10 being better than books #10-20.</span></span></h1>
+<h1 class="page-title">Book Rankings <span class="info-tooltip"><span class="info-icon">i</span><span class="tooltip-text">I scraped marginalrevolution.com/marginalrevolution/category/books. I used gemini-2.5-flash because it's affordable and llama is too slow on my macbook. I had it first extract book titles from posts. I then had it compare two books at a time to see which review expressed a stronger positive sentiment. There are roughly 24.5 million such comparisons to do for an exhaustive set, but I already racked up a decent bill on gemini with 2 million comparisons so I stopped there. Thus the rankings are roughly accurate but not necessarily extremely precise. You shouldn't necessarily interpret book #5 as being better than book #6, but moreso books #1-10 being better than books #10-20.</span></span></h1>
 <p class="page-subtitle">Tyler Cowen's favorites from Marginal Revolution</p>
 
 <div class="filters">
