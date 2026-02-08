@@ -671,7 +671,7 @@ SEARCH_CONTENT = '''
         </select>
         <label for="top">Results:</label>
         <input type="number" id="top" name="top"
-               value="{{ top or 20 }}" min="1" max="100" style="width: 60px;">
+               value="{{ top or 20 }}" min="1" max="100" style="width: 80px;">
         <button type="submit">Search</button>
     </form>
     <div class="search-hint">Try: "Weimar Republic", "behavioral economics", "artificial intelligence", "Chinese history"</div>
