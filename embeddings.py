@@ -8,6 +8,23 @@ import numpy as np
 DEFAULT_MODEL = 'all-MiniLM-L6-v2'
 MAX_TEXT_LENGTH = 2000  # Approx 512 tokens
 
+# Global model cache - loaded once at startup
+_model_cache = {}
+
+
+def get_model(model_name=DEFAULT_MODEL):
+    """Get or load the sentence transformer model (cached)."""
+    if model_name not in _model_cache:
+        from sentence_transformers import SentenceTransformer
+        print(f"Loading model: {model_name}...")
+        _model_cache[model_name] = SentenceTransformer(model_name)
+    return _model_cache[model_name]
+
+
+def preload_model(model_name=DEFAULT_MODEL):
+    """Preload the model at startup."""
+    get_model(model_name)
+
 
 def get_embedding_text(title, author, context_text):
     """Build text for embedding a book.
@@ -47,7 +64,6 @@ def generate_embeddings(model_name=DEFAULT_MODEL, reset=False):
         model_name: Sentence transformer model to use
         reset: If True, regenerate all embeddings (ignore cache)
     """
-    from sentence_transformers import SentenceTransformer
     from db import (
         get_books_for_embedding,
         get_existing_embeddings,
@@ -58,8 +74,7 @@ def generate_embeddings(model_name=DEFAULT_MODEL, reset=False):
 
     init_db()
 
-    print(f"Loading model: {model_name}...")
-    model = SentenceTransformer(model_name)
+    model = get_model(model_name)
 
     # Get all books with context
     print("Fetching books from database...")
@@ -132,7 +147,6 @@ def semantic_search(query, top_k=20, genre=None, min_score=None,
     Returns:
         List of dicts with book info, similarity scores, and post URLs
     """
-    from sentence_transformers import SentenceTransformer
     from db import load_embeddings_with_genre, get_embedding_count, get_post_urls_for_book, init_db
 
     init_db()
@@ -144,8 +158,7 @@ def semantic_search(query, top_k=20, genre=None, min_score=None,
         print("Run 'python main.py embed' first to generate embeddings.")
         return []
 
-    print(f"Loading model: {model_name}...")
-    model = SentenceTransformer(model_name)
+    model = get_model(model_name)
 
     # Embed the query
     query_embedding = model.encode(query, convert_to_numpy=True).astype(np.float32)

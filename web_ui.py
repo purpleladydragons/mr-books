@@ -11,6 +11,12 @@ app = Flask(__name__)
 # Configuration - can be overridden with environment variables
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
 
+# Preload the embedding model at startup to avoid loading on each request
+print("Preloading embedding model...")
+from embeddings import preload_model
+preload_model()
+print("Model loaded.")
+
 
 def get_all_genres():
     """Get all genres with book counts."""
