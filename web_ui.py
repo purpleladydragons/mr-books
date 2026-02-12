@@ -144,10 +144,9 @@ BASE_TEMPLATE = '''
         }
         .page-subtitle {
             font-size: 14px;
-            color: #9ca3af;
+            color: #6b7280;
             margin-bottom: 12px;
-            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-            text-transform: uppercase;
+            font-family: 'Inter', sans-serif;
         }
         .page-description {
             font-size: 12px;
@@ -155,6 +154,7 @@ BASE_TEMPLATE = '''
             margin-bottom: 20px;
             line-height: 1.5;
             max-width: 700px;
+            font-family: 'Inter', sans-serif;
         }
         /* Info tooltip (kept for potential future use) */
         .info-tooltip {
@@ -551,7 +551,7 @@ BASE_TEMPLATE = '''
 RANKINGS_CONTENT = '''
 <h1 class="page-title">Marginal Revolution Book Rankings</h1>
 <p class="page-subtitle">Tyler and Alex's favorites from Marginal Revolution</p>
-<p class="page-description">I scraped every post categorized under 'books'. Then extracted book titles and relevant review context from each post. I then submitted a couple million pairs of reviews to an LLM to compare and determine which book review had more positive sentiment. I used these comparisons to fit a Bradley-Terry model which produces these rankings. I racked up a gemini bill so stopped shy of exhaustive 16 million comparisons, so it's not perfect, but roughly accurate.</p>
+<p class="page-description"><strong>How it works:</strong> I scraped every post categorized under 'books'. Then extracted book titles and relevant review context from each post. I then submitted a couple million pairs of reviews to an LLM to compare and determine which book review had more positive sentiment. I used these comparisons to fit a Bradley-Terry model which produces these rankings. I racked up a gemini bill so stopped shy of exhaustive 16 million comparisons, so it's not perfect, but roughly accurate.</p>
 
 <div class="filters">
     <form method="GET" action="/">
@@ -562,29 +562,18 @@ RANKINGS_CONTENT = '''
             <option value="{{ g }}" {{ 'selected' if genre == g else '' }}>{{ g|title }} ({{ count }})</option>
             {% endfor %}
         </select>
-        <label for="min_comparisons">Min comparisons:</label>
-        <input type="number" id="min_comparisons" name="min_comparisons"
-               value="{{ min_comparisons or '' }}" min="0" placeholder="0">
-        <label for="top">Show top:</label>
-        <input type="number" id="top" name="top"
-               value="{{ top or '' }}" min="1" placeholder="All">
         <button type="submit">Filter</button>
     </form>
 </div>
 
-{% if genre or min_comparisons %}
+{% if genre %}
 <div class="filter-section">
-    {% if genre %}
-    <span class="active-filter">Genre: {{ genre|title }} <a href="/?{% if min_comparisons %}min_comparisons={{ min_comparisons }}{% endif %}{% if top %}&top={{ top }}{% endif %}">&times;</a></span>
-    {% endif %}
-    {% if min_comparisons %}
-    <span class="active-filter">{{ min_comparisons }}+ comparisons <a href="/?{% if genre %}genre={{ genre }}{% endif %}{% if top %}&top={{ top }}{% endif %}">&times;</a></span>
-    {% endif %}
+    <span class="active-filter">Genre: {{ genre|title }} <a href="/">&times;</a></span>
 </div>
 {% endif %}
 
 <div class="stats">
-    Showing {{ books|length }} books{% if genre %} in {{ genre|title }}{% endif %}{% if min_comparisons %} with {{ min_comparisons }}+ comparisons{% endif %}
+    Showing {{ books|length }} books{% if genre %} in {{ genre|title }}{% endif %}
 </div>
 
 <div class="book-list">
