@@ -145,12 +145,18 @@ BASE_TEMPLATE = '''
         .page-subtitle {
             font-size: 14px;
             color: #9ca3af;
-            margin-bottom: 32px;
+            margin-bottom: 12px;
             font-family: 'SF Mono', Monaco, 'Courier New', monospace;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
         }
-        /* Info tooltip */
+        .page-description {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 20px;
+            line-height: 1.5;
+            max-width: 700px;
+        }
+        /* Info tooltip (kept for potential future use) */
         .info-tooltip {
             position: relative;
             display: inline-block;
@@ -543,8 +549,9 @@ BASE_TEMPLATE = '''
 '''
 
 RANKINGS_CONTENT = '''
-<h1 class="page-title">Book Rankings <span class="info-tooltip"><span class="info-icon">i</span><span class="tooltip-text">I scraped marginalrevolution.com/marginalrevolution/category/books. I used gemini-2.5-flash because it's affordable and llama is too slow on my macbook. I had it first extract book titles from posts. I then had it compare two books at a time to see which review expressed a stronger positive sentiment. These comparisons were then used in a Bradley-Terry model to generate a ranking of the books. There are roughly 16 million such comparisons to do for an exhaustive set, but I already racked up a decent bill on gemini with 2 million comparisons so I stopped there. Thus the rankings are roughly accurate but not necessarily extremely precise. You shouldn't necessarily interpret book #5 as being better than book #6, but moreso books #1-10 being better than books #10-20.</span></span></h1>
+<h1 class="page-title">Marginal Revolution Book Rankings</h1>
 <p class="page-subtitle">Tyler and Alex's favorites from Marginal Revolution</p>
+<p class="page-description">I scraped every post categorized under 'books'. Then extracted book titles and relevant review context from each post. I then submitted a couple million pairs of reviews to an LLM to compare and determine which book review had more positive sentiment. I used these comparisons to fit a Bradley-Terry model which produces these rankings. I racked up a gemini bill so stopped shy of exhaustive 16 million comparisons, so it's not perfect, but roughly accurate.</p>
 
 <div class="filters">
     <form method="GET" action="/">
