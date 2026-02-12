@@ -514,18 +514,46 @@ BASE_TEMPLATE = '''
         /* Responsive */
         @media (max-width: 768px) {
             .content-card {
-                padding: 32px 24px;
+                padding: 24px 20px;
                 margin: 0 10px;
             }
             .page-title {
-                font-size: 26px;
+                font-size: 22px;
+            }
+            .page-subtitle {
+                font-size: 12px;
+                margin-bottom: 8px;
+            }
+            .page-description {
+                font-size: 11px;
+                margin-bottom: 12px;
             }
             input[type="text"] {
                 width: 100%;
             }
+            .filters {
+                padding: 12px 16px;
+                margin-bottom: 16px;
+            }
             .filters form {
-                flex-direction: column;
-                align-items: stretch;
+                flex-direction: row;
+                align-items: center;
+                flex-wrap: nowrap;
+                gap: 8px;
+            }
+            .filters label {
+                display: none;
+            }
+            .filters select {
+                flex: 1;
+                min-width: 0;
+            }
+            .filters button {
+                padding: 10px 16px;
+                white-space: nowrap;
+            }
+            .stats {
+                margin-bottom: 12px;
             }
         }
     </style>
